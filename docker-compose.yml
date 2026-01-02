@@ -1,0 +1,17 @@
+services:
+  db:
+    image: mysql:8.4
+    container_name: ai_course_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ai_course
+      MYSQL_USER: jennifer
+      MYSQL_PASSWORD: jennifer
+    ports:
+      - "3306:3306"
+    volumes:
+      - ai_course_mysql_data:/var/lib/mysql
+
+volumes:
+  ai_course_mysql_data:
