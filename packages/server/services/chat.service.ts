@@ -166,8 +166,33 @@ function calculateMath(expression: string): number {
    return values[0];
 }
 
-function getExchangeRate(_currencyCode: string): string {
-   return 'לא מכיר את קוד המטבע שביקשת.';
+function getExchangeRate(currencyCode: string): string {
+   const normalizedCode = currencyCode.trim().toUpperCase();
+   if (!normalizedCode) {
+      return 'לא מכיר את קוד המטבע שביקשת.';
+   }
+
+   const rates: Record<string, number> = {
+      USD: 3.75,
+      EUR: 4.05,
+      GBP: 4.7,
+      JPY: 0.026,
+   };
+
+   const labels: Record<string, string> = {
+      USD: 'הדולר',
+      EUR: 'האירו',
+      GBP: 'הליש״ט',
+      JPY: 'היין היפני',
+   };
+
+   const rate = rates[normalizedCode];
+   if (!rate) {
+      return 'לא מכיר את קוד המטבע שביקשת.';
+   }
+
+   const label = labels[normalizedCode] ?? normalizedCode;
+   return `שער ${label} היציג הוא ${rate} ש״ח`;
 }
 
 async function generalChat(
