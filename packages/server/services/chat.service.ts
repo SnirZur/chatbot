@@ -74,8 +74,96 @@ async function getWeather(city: string): Promise<string> {
    }
 }
 
-function calculateMath(_expression: string): number {
-   return Number.NaN;
+function calculateMath(expression: string): number {
+   const trimmed = expression.replace(/\s+/g, '');
+   if (!trimmed) {
+      return Number.NaN;
+   }
+
+   const values: number[] = [];
+   const operators: string[] = [];
+   const precedence: Record<string, number> = {
+      '+': 1,
+      '-': 1,
+      '*': 2,
+      '/': 2,
+   };
+
+   const applyOperator = () => {
+      const operator = operators.pop();
+      const right = values.pop();
+      const left = values.pop();
+      if (!operator || right === undefined || left === undefined) {
+         values.push(Number.NaN);
+         return;
+      }
+
+      let result = Number.NaN;
+      switch (operator) {
+         case '+':
+            result = left + right;
+            break;
+         case '-':
+            result = left - right;
+            break;
+         case '*':
+            result = left * right;
+            break;
+         case '/':
+            result = left / right;
+            break;
+         default:
+            result = Number.NaN;
+      }
+
+      values.push(result);
+   };
+
+   let index = 0;
+   while (index < trimmed.length) {
+      const char = trimmed[index];
+      const isUnarySign =
+         (char === '+' || char === '-') &&
+         (index === 0 || /[+\-*/]/.test(trimmed[index - 1]));
+
+      if (/\d|\./.test(char) || isUnarySign) {
+         let start = index;
+         index += 1;
+         while (index < trimmed.length && /[\d.]/.test(trimmed[index])) {
+            index += 1;
+         }
+         const value = Number(trimmed.slice(start, index));
+         if (!Number.isFinite(value)) {
+            return Number.NaN;
+         }
+         values.push(value);
+         continue;
+      }
+
+      if (!/[+\-*/]/.test(char)) {
+         return Number.NaN;
+      }
+
+      while (
+         operators.length > 0 &&
+         precedence[operators[operators.length - 1]] >= precedence[char]
+      ) {
+         applyOperator();
+      }
+
+      operators.push(char);
+      index += 1;
+   }
+
+   while (operators.length > 0) {
+      applyOperator();
+   }
+
+   if (values.length !== 1 || !Number.isFinite(values[0])) {
+      return Number.NaN;
+   }
+
+   return values[0];
 }
 
 function getExchangeRate(_currencyCode: string): string {
