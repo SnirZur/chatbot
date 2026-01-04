@@ -28,6 +28,7 @@ docker compose up -d
 OPENAI_API_KEY=sk-...
 DATABASE_URL="mysql://jennifer:jennifer@localhost:3306/ai_course"
 HF_TOKEN=...
+WEATHER_API_KEY=...
 ```
 
 5) Run migrations:
@@ -44,5 +45,10 @@ cd ../..
 bun run dev
 ```
 
-Client: http://localhost:5173
+Client: http://localhost:5137
 Server: http://localhost:3000
+
+Router features:
+- The server routes weather, math, and exchange-rate queries to local handlers.
+- General chat uses the LLM with persisted conversation history.
+- Use `/reset` to clear the saved history.
