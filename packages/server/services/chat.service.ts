@@ -31,8 +31,47 @@ type IntentResult = {
    currencyCode?: string;
 };
 
-async function getWeather(_city: string): Promise<string> {
-   return 'לא הצלחתי להביא את הנתונים על מזג האוויר כרגע, נסה שוב מאוחר יותר.';
+async function getWeather(city: string): Promise<string> {
+   const apiKey = process.env.WEATHER_API_KEY;
+   if (!apiKey) {
+      return 'לא הצלחתי להביא את הנתונים על מזג האוויר כרגע, נסה שוב מאוחר יותר.';
+   }
+
+   const normalizedCity = city.trim();
+   if (!normalizedCity) {
+      return 'לא הצלחתי להבין לאיזו עיר אתה מתכוון.';
+   }
+
+   const controller = new AbortController();
+   const timeout = setTimeout(() => controller.abort(), 5000);
+
+   try {
+      const url = new URL('https://api.openweathermap.org/data/2.5/weather');
+      url.searchParams.set('q', normalizedCity);
+      url.searchParams.set('appid', apiKey);
+      url.searchParams.set('units', 'metric');
+      url.searchParams.set('lang', 'he');
+
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+         throw new Error('Weather API request failed.');
+      }
+
+      const data = await response.json();
+      const temp = Number(data?.main?.temp);
+      const description = data?.weather?.[0]?.description;
+
+      if (!Number.isFinite(temp) || typeof description !== 'string') {
+         throw new Error('Weather API returned invalid data.');
+      }
+
+      return `${Math.round(temp)} מעלות, ${description}`;
+   } catch (error) {
+      console.error(error);
+      return 'לא הצלחתי להביא את הנתונים על מזג האוויר כרגע, נסה שוב מאוחר יותר.';
+   } finally {
+      clearTimeout(timeout);
+   }
 }
 
 function calculateMath(_expression: string): number {
