@@ -25,6 +25,11 @@ type GenerateTextResult = {
    text: string;
 };
 
+type ChatMessage = {
+   role: 'system' | 'user' | 'assistant';
+   content: string;
+};
+
 export const llmClient = {
    async generateText({
       model = 'gpt-4.1',
@@ -46,6 +51,30 @@ export const llmClient = {
       return {
          id: response.id,
          text: response.output_text,
+      };
+   },
+
+   async chatCompletion({
+      model = 'gpt-4o-mini',
+      messages,
+      temperature = 0.2,
+      maxTokens = 300,
+   }: {
+      model?: string;
+      messages: ChatMessage[];
+      temperature?: number;
+      maxTokens?: number;
+   }): Promise<GenerateTextResult> {
+      const response = await openAIClient.chat.completions.create({
+         model,
+         messages,
+         temperature,
+         max_tokens: maxTokens,
+      });
+
+      return {
+         id: response.id,
+         text: response.choices[0]?.message?.content ?? '',
       };
    },
 

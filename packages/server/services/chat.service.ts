@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { conversationRepository } from '../repositories/conversation.repository';
 import template from '../llm/prompts/chatbot.txt';
 import { llmClient } from '../llm/client';
 
@@ -82,6 +81,21 @@ type IntentResult = {
    expression?: string;
    currencyCode?: string;
 };
+
+const classifierInstructions = `אתה מסווג כוונות לשירות צ'אט. תפקידך היחיד הוא להחזיר JSON תקין בלבד.
+החזֵר בדיוק אובייקט JSON אחד ללא טקסט נוסף, ללא עטיפות קוד וללא הסברים.
+
+קטגוריות אפשריות (חובה לבחור אחת בדיוק):
+- "weather": בקשה למזג אוויר. החזר גם "city".
+- "math": חישוב ביטוי מתמטי. החזר גם "expression".
+- "exchange_rate": בקשה לשער חליפין. החזר גם "currencyCode" (קוד מטבע באנגלית, למשל USD או EUR).
+- "general": כל דבר אחר.
+
+דוגמאות:
+{"intent":"weather","city":"חיפה"}
+{"intent":"math","expression":"150 + 20"}
+{"intent":"exchange_rate","currencyCode":"USD"}
+{"intent":"general"}`.trim();
 
 async function getWeather(city: string): Promise<string> {
    const apiKey = process.env.WEATHER_API_KEY;
@@ -248,36 +262,80 @@ function getExchangeRate(currencyCode: string): string {
 }
 
 async function generalChat(
-   _context: Message[],
-   userInput: string,
-   conversationId: string
-): Promise<ChatResponse> {
-   const response = await llmClient.generateText({
+   context: Message[],
+   userInput: string
+): Promise<string> {
+   const messages: Message[] = [
+      { role: 'system', content: instructions },
+      ...context,
+      { role: 'user', content: userInput },
+   ];
+
+   const response = await llmClient.chatCompletion({
       model: 'gpt-4o-mini',
-      instructions,
-      prompt: userInput,
+      messages,
       temperature: 0.2,
       maxTokens: 200,
-      previousResponseId:
-         conversationRepository.getLastResponseId(conversationId),
    });
 
-   conversationRepository.setLastResponseId(conversationId, response.id);
-
-   return {
-      id: response.id,
-      message: response.text,
-   };
+   return response.text;
 }
 
-async function classifyIntent(_message: string): Promise<IntentResult> {
-   return { intent: 'general' };
+function extractJson(text: string): IntentResult | null {
+   const match = text.match(/\{[\s\S]*\}/);
+   if (!match) {
+      return null;
+   }
+
+   try {
+      return JSON.parse(match[0]) as IntentResult;
+   } catch (error) {
+      console.error('Failed to parse classifier JSON:', error);
+      return null;
+   }
+}
+
+async function classifyIntent(message: string): Promise<IntentResult> {
+   try {
+      const response = await llmClient.generateText({
+         model: 'gpt-4o-mini',
+         instructions: classifierInstructions,
+         prompt: message,
+         temperature: 0,
+         maxTokens: 120,
+      });
+
+      const parsed = extractJson(response.text);
+      if (!parsed || typeof parsed.intent !== 'string') {
+         return { intent: 'general' };
+      }
+
+      const intent = parsed.intent as Intent;
+      if (
+         intent !== 'weather' &&
+         intent !== 'math' &&
+         intent !== 'exchange_rate' &&
+         intent !== 'general'
+      ) {
+         return { intent: 'general' };
+      }
+
+      return {
+         intent,
+         city: parsed.city,
+         expression: parsed.expression,
+         currencyCode: parsed.currencyCode,
+      };
+   } catch (error) {
+      console.error('Classifier failed:', error);
+      return { intent: 'general' };
+   }
 }
 
 async function routeMessage(
    history: Message[],
    userInput: string,
-   conversationId: string
+   _conversationId: string
 ): Promise<ChatResponse> {
    if (userInput.trim() === '/reset') {
       await resetHistory();
@@ -313,7 +371,10 @@ async function routeMessage(
       };
    }
 
-   return generalChat(history, userInput, conversationId);
+   return {
+      id: crypto.randomUUID(),
+      message: await generalChat(history, userInput),
+   };
 }
 
 // Public interface
