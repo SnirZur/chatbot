@@ -9,6 +9,58 @@ const parkInfo = fs.readFileSync(
    'utf-8'
 );
 const instructions = template.replace('{{parkInfo}}', parkInfo);
+const historyFilePath = path.resolve(
+   import.meta.dir,
+   '..',
+   '..',
+   '..',
+   'history.json'
+);
+
+const history: Message[] = [];
+
+async function loadHistory() {
+   try {
+      const file = Bun.file(historyFilePath);
+      if (await file.exists()) {
+         const text = await file.text();
+         const parsed = JSON.parse(text);
+         if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+               if (
+                  item &&
+                  (item.role === 'user' ||
+                     item.role === 'assistant' ||
+                     item.role === 'system') &&
+                  typeof item.content === 'string'
+               ) {
+                  history.push({ role: item.role, content: item.content });
+               }
+            }
+         }
+         console.log('ברוך שובך! טענתי את היסטוריית השיחה הקודמת.');
+      }
+   } catch (error) {
+      console.error('Failed to load history:', error);
+   }
+}
+
+async function saveHistory() {
+   try {
+      await Bun.write(historyFilePath, JSON.stringify(history, null, 2));
+   } catch (error) {
+      console.error('Failed to save history:', error);
+   }
+}
+
+async function resetHistory() {
+   history.length = 0;
+   try {
+      await Bun.write(historyFilePath, JSON.stringify(history, null, 2));
+   } catch (error) {
+      console.error('Failed to reset history:', error);
+   }
+}
 
 type ChatResponse = {
    id: string;
@@ -228,6 +280,7 @@ async function routeMessage(
    conversationId: string
 ): Promise<ChatResponse> {
    if (userInput.trim() === '/reset') {
+      await resetHistory();
       return {
          id: crypto.randomUUID(),
          message: 'היסטוריית השיחה אופסה. נתחיל שיחה חדשה.',
@@ -269,6 +322,16 @@ export const chatService = {
       prompt: string,
       conversationId: string
    ): Promise<ChatResponse> {
-      return routeMessage([], prompt, conversationId);
+      const response = await routeMessage(history, prompt, conversationId);
+
+      if (prompt.trim() !== '/reset') {
+         history.push({ role: 'user', content: prompt });
+         history.push({ role: 'assistant', content: response.message });
+         await saveHistory();
+      }
+
+      return response;
    },
 };
+
+await loadHistory();
