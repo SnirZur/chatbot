@@ -1,13 +1,6 @@
-import fs from 'fs';
 import path from 'path';
-import template from '../llm/prompts/chatbot.txt';
 import { llmClient } from '../llm/client';
 
-const parkInfo = fs.readFileSync(
-   path.join(__dirname, '..', 'llm', 'prompts', 'WonderWorld.md'),
-   'utf-8'
-);
-const instructions = template.replace('{{parkInfo}}', parkInfo);
 const genericInstructions =
    "You are a helpful assistant. Answer the user's question accurately and concisely. Do not limit your responses to any specific product, brand, or domain unless the user asks for that context. If you are unsure, state that you don't know rather than fabricating an answer.";
 const historyFilePath = path.resolve(
@@ -247,7 +240,6 @@ function calculateMath(expression: string): number {
       return Number.NaN;
    }
 
-   // @ts-ignore
    return values[0];
 }
 
