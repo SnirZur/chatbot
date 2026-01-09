@@ -37,6 +37,8 @@ const ChatMessages = ({ messages }: Props) => {
                      ? 'bg-blue-600 text-white self-end'
                      : 'bg-gray-100 text-black self-start'
                }`}
+               dir="auto"
+               style={{ unicodeBidi: 'plaintext' }}
             >
                <ReactMarkdown>{message.content}</ReactMarkdown>
             </div>

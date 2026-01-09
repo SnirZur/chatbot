@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ChatInput, { type ChatFormData } from './ChatInput';
 import type { Message } from './ChatMessages';
 import ChatMessages from './ChatMessages';
@@ -17,11 +17,37 @@ type ChatResponse = {
    message: string;
 };
 
+type HistoryStatusResponse = {
+   hasHistory: boolean;
+   message: string;
+};
+
 const ChatBot = () => {
    const [messages, setMessages] = useState<Message[]>([]);
    const [isBotTyping, setIsBotTyping] = useState(false);
    const [error, setError] = useState('');
    const conversationId = useRef(crypto.randomUUID());
+
+   useEffect(() => {
+      let isActive = true;
+
+      const loadHistoryStatus = async () => {
+         try {
+            const { data } =
+               await axios.get<HistoryStatusResponse>('/api/chat/history');
+            if (isActive && data.hasHistory && data.message) {
+               setMessages([{ content: data.message, role: 'bot' }]);
+            }
+         } catch (error) {
+            console.error(error);
+         }
+      };
+
+      loadHistoryStatus();
+      return () => {
+         isActive = false;
+      };
+   }, []);
 
    const onSubmit = async ({ prompt }: ChatFormData) => {
       try {
