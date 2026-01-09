@@ -2,7 +2,7 @@ import path from 'path';
 import { llmClient } from '../llm/client';
 
 const genericInstructions =
-   "You are a helpful assistant. Answer the user's question accurately and concisely. Do not limit your responses to any specific product, brand, or domain unless the user asks for that context. If you are unsure, state that you don't know rather than fabricating an answer.";
+   "You are a helpful assistant. Answer the user's question accurately and concisely. Use the provided conversation history to answer questions about what was said before. Do not limit your responses to any specific product, brand, or domain unless the user asks for that context. If you are unsure, state that you don't know rather than fabricating an answer.";
 const historyFilePath = path.resolve(
    import.meta.dir,
    '..',
