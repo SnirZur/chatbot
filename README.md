@@ -45,7 +45,7 @@ cd ../..
 bun run dev
 ```
 
-Client: http://localhost:5137
+Client: http://localhost:5138
 Server: http://localhost:3000
 
 Router features:

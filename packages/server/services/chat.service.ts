@@ -298,6 +298,28 @@ async function generalChat(
    return response.text;
 }
 
+const genericInstructions = `You are a helpful assistant. Answer the user's question accurately and concisely. Do not limit your responses to any specific product, brand, or domain unless the user asks for that context. If you are unsure, state that you don't know rather than fabricating an answer.`;
+
+async function generalChatOnline(
+   context: Message[],
+   userInput: string
+): Promise<string> {
+   const messages: Message[] = [
+      { role: 'system', content: genericInstructions },
+      ...context,
+      { role: 'user', content: userInput },
+   ];
+
+   const response = await llmClient.chatCompletion({
+      model: 'gpt-4o-mini',
+      messages,
+      temperature: 0.2,
+      maxTokens: 400,
+   });
+
+   return response.text;
+}
+
 function extractJson(text: string): IntentResult | null {
    const match = text.match(/\{[\s\S]*\}/);
    if (!match) {
@@ -390,7 +412,7 @@ async function routeMessage(
 
    return {
       id: crypto.randomUUID(),
-      message: await generalChat(history, userInput),
+      message: await generalChatOnline(history, userInput),
    };
 }
 
