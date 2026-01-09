@@ -27,7 +27,6 @@ docker compose up -d
 ```
 OPENAI_API_KEY=sk-...
 DATABASE_URL="mysql://jennifer:jennifer@localhost:3306/ai_course"
-HF_TOKEN=...
 WEATHER_API_KEY=...
 ```
 
@@ -38,7 +37,13 @@ cd packages/server
 bunx prisma migrate deploy
 ```
 
-6) Run the app (client + server):
+6) Generate Prisma client:
+
+```
+bunx prisma generate
+```
+
+7) Run the app (client + server):
 
 ```
 cd ../..
