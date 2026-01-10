@@ -18,6 +18,9 @@ type GenerateTextOptions = {
    temperature?: number;
    maxTokens?: number;
    previousResponseId?: string;
+   responseFormat?: {
+      type: 'json_object';
+   };
 };
 
 type GenerateTextResult = {
@@ -46,6 +49,7 @@ export const llmClient = {
          temperature,
          max_output_tokens: maxTokens,
          previous_response_id: previousResponseId,
+         response_format: responseFormat,
       });
 
       return {
