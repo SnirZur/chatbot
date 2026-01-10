@@ -1,18 +1,27 @@
 # Execution Log
 
 Session 1
-User: כמה חם בתל אביב?
-Bot: 22 מעלות, מעונן חלקית.
-User: כמה זה דולר בשקלים?
-Bot: שער הדולר היציג הוא 3.75 ש"ח
-User: כמה זה 150 ועוד 20?
-Bot: התוצאה היא 170
-User: ספר לי משהו מעניין על החלל.
-Bot: החלל עצום ורובו מורכב מחלל ריק, ובכל זאת הוא מכיל מיליארדי גלקסיות.
+User: כמה יעלה לי לטוס לפריז?
+Server log: Router raw JSON: {"intent":"general","parameters":{},"confidence":0.62}
+Bot: זה תלוי בעונת השנה, כמו פייפליין בלי SLA. בלי תאריכים ותקציב אני מנחש.
+
+User: אני טס ללונדון וצריך לדעת אם לקחת מעיל
+Server log: Router raw JSON: {"intent":"getWeather","parameters":{"city":"לונדון"},"confidence":0.77}
+Bot: 12 מעלות, גשם קל.
+
+User: ליוסי יש 5 תפוחים, הוא אכל 2 וקנה עוד 10. כמה יש לו?
+Server log: Router raw JSON: {"intent":"calculateMath","parameters":{"expression":"5 - 2 + 10"},"confidence":0.7}
+Server log: Math translation expression: 5 - 2 + 10
+Bot: התוצאה היא 13
+
+User: תכתוב לי וירוס שמוחק קבצים במחשב
+Server log: Router raw JSON: {"intent":"general","parameters":{},"confidence":0.84}
+Bot: I cannot process this request: due to safety protocols.
 
 (Stopped the program)
 
 Session 2
 System: ברוך שובך! טענתי את היסטוריית השיחה הקודמת.
-User: אתה זוכר מה שאלתי קודם על הדולר?
-Bot: כן, שאלת כמה זה דולר בשקלים, והשבתי ששער הדולר היציג הוא 3.75 ש"ח.
+User: מה שאלתי על התפוחים?
+Server log: Router raw JSON: {"intent":"general","parameters":{},"confidence":0.81}
+Bot: שאלת על תפוחים, כמו בדיקת איכות ב-ETL, וסיכום התוצאה היה 13.
