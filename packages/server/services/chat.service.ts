@@ -1,8 +1,10 @@
 import path from 'path';
 import { llmClient } from '../llm/client';
-
-const genericInstructions =
-   "You are a helpful assistant. Answer the user's question accurately and concisely. Use the provided conversation history to answer questions about what was said before. Do not limit your responses to any specific product, brand, or domain unless the user asks for that context. If you are unsure, state that you don't know rather than fabricating an answer.";
+import {
+   generalChatPrompt,
+   mathTranslatorPrompt,
+   routerPrompt,
+} from './prompts';
 const historyFilePath = path.resolve(
    import.meta.dir,
    '..',
@@ -72,30 +74,13 @@ type Message = {
    content: string;
 };
 
-type Intent = 'weather' | 'math' | 'exchange_rate' | 'general';
+type Intent = 'getWeather' | 'calculateMath' | 'getExchangeRate' | 'general';
 
-type IntentResult = {
+type RouterResult = {
    intent: Intent;
-   city?: string;
-   expression?: string;
-   currencyCode?: string;
+   parameters: Record<string, unknown>;
+   confidence: number;
 };
-
-const classifierInstructions =
-   `אתה מסווג כוונות לשירות צ'אט. תפקידך היחיד הוא להחזיר JSON תקין בלבד.
-החזֵר בדיוק אובייקט JSON אחד ללא טקסט נוסף, ללא עטיפות קוד וללא הסברים.
-
-קטגוריות אפשריות (חובה לבחור אחת בדיוק):
-- "weather": בקשה למזג אוויר. החזר גם "city".
-- "math": חישוב ביטוי מתמטי. החזר גם "expression".
-- "exchange_rate": בקשה לשער חליפין. החזר גם "currencyCode" (קוד מטבע באנגלית, למשל USD או EUR).
-- "general": כל דבר אחר.
-
-דוגמאות:
-{"intent":"weather","city":"חיפה"}
-{"intent":"math","expression":"150 + 20"}
-{"intent":"exchange_rate","currencyCode":"USD"}
-{"intent":"general"}`.trim();
 
 async function getWeather(city: string): Promise<string> {
    const apiKey = process.env.WEATHER_API_KEY;
@@ -244,10 +229,15 @@ function calculateMath(expression: string): number {
    return values[0];
 }
 
-function getExchangeRate(currencyCode: string): string {
-   const normalizedCode = currencyCode.trim().toUpperCase();
-   if (!normalizedCode) {
+function getExchangeRate(from: string, to = 'ILS'): string {
+   const normalizedFrom = from.trim().toUpperCase();
+   const normalizedTo = to.trim().toUpperCase() || 'ILS';
+   if (!normalizedFrom) {
       return 'לא מכיר את קוד המטבע שביקשת.';
+   }
+
+   if (normalizedTo !== 'ILS') {
+      return 'כרגע אני תומך רק בשער מול ש״ח.';
    }
 
    const rates: Record<string, number> = {
@@ -264,12 +254,12 @@ function getExchangeRate(currencyCode: string): string {
       JPY: 'היין היפני',
    };
 
-   const rate = rates[normalizedCode];
+   const rate = rates[normalizedFrom];
    if (!rate) {
       return 'לא מכיר את קוד המטבע שביקשת.';
    }
 
-   const label = labels[normalizedCode] ?? normalizedCode;
+   const label = labels[normalizedFrom] ?? normalizedFrom;
    return `שער ${label} היציג הוא ${rate} ש״ח`;
 }
 
@@ -278,7 +268,7 @@ async function generalChat(
    userInput: string
 ): Promise<string> {
    const messages: Message[] = [
-      { role: 'system', content: genericInstructions },
+      { role: 'system', content: generalChatPrompt },
       ...context,
       { role: 'user', content: userInput },
    ];
@@ -293,54 +283,93 @@ async function generalChat(
    return response.text;
 }
 
-function extractJson(text: string): IntentResult | null {
+function extractJson(text: string): string | null {
    const match = text.match(/\{[\s\S]*\}/);
-   if (!match) {
-      return null;
-   }
-
-   try {
-      return JSON.parse(match[0]) as IntentResult;
-   } catch (error) {
-      console.error('Failed to parse classifier JSON:', error);
-      return null;
-   }
+   return match ? match[0] : null;
 }
 
-async function classifyIntent(message: string): Promise<IntentResult> {
+function parseRouterResult(text: string): RouterResult | null {
+   const candidate = extractJson(text) ?? text;
    try {
-      const response = await llmClient.generateText({
-         model: 'gpt-4o-mini',
-         instructions: classifierInstructions,
-         prompt: message,
-         temperature: 0,
-         maxTokens: 120,
-      });
-
-      const parsed = extractJson(response.text);
-      if (!parsed || typeof parsed.intent !== 'string') {
-         return { intent: 'general' };
+      const parsed = JSON.parse(candidate) as RouterResult;
+      if (
+         !parsed ||
+         typeof parsed.intent !== 'string' ||
+         typeof parsed.confidence !== 'number' ||
+         parsed.confidence < 0 ||
+         parsed.confidence > 1 ||
+         typeof parsed.parameters !== 'object' ||
+         parsed.parameters === null
+      ) {
+         return null;
       }
 
       const intent = parsed.intent as Intent;
       if (
-         intent !== 'weather' &&
-         intent !== 'math' &&
-         intent !== 'exchange_rate' &&
+         intent !== 'getWeather' &&
+         intent !== 'calculateMath' &&
+         intent !== 'getExchangeRate' &&
          intent !== 'general'
       ) {
-         return { intent: 'general' };
+         return null;
       }
 
       return {
          intent,
-         city: parsed.city,
-         expression: parsed.expression,
-         currencyCode: parsed.currencyCode,
+         parameters: parsed.parameters,
+         confidence: parsed.confidence,
       };
    } catch (error) {
+      console.error('Failed to parse router JSON:', error);
+      return null;
+   }
+}
+
+function isExpressionClean(expression: string): boolean {
+   return /^[\d+\-*/().\s]+$/.test(expression);
+}
+
+async function translateMathExpression(
+   problem: string
+): Promise<string | null> {
+   const response = await llmClient.generateText({
+      model: 'gpt-4o-mini',
+      instructions: mathTranslatorPrompt,
+      prompt: problem,
+      temperature: 0,
+      maxTokens: 60,
+   });
+
+   const expression = response.text.trim().split('\n')[0]?.trim();
+   if (!expression || !isExpressionClean(expression)) {
+      return null;
+   }
+
+   console.log('Math translation expression:', expression);
+   return expression;
+}
+
+async function classifyIntent(message: string): Promise<RouterResult> {
+   try {
+      const response = await llmClient.generateText({
+         model: 'gpt-4o-mini',
+         instructions: routerPrompt,
+         prompt: message,
+         temperature: 0,
+         maxTokens: 240,
+         responseFormat: { type: 'json_object' },
+      });
+
+      console.log('Router raw JSON:', response.text);
+      const parsed = parseRouterResult(response.text);
+      if (!parsed) {
+         return { intent: 'general', parameters: {}, confidence: 0 };
+      }
+
+      return parsed;
+   } catch (error) {
       console.error('Classifier failed:', error);
-      return { intent: 'general' };
+      return { intent: 'general', parameters: {}, confidence: 0 };
    }
 }
 
@@ -359,15 +388,44 @@ async function routeMessage(
 
    const classification = await classifyIntent(userInput);
 
-   if (classification.intent === 'weather') {
+   if (classification.confidence < 0.5) {
       return {
          id: crypto.randomUUID(),
-         message: await getWeather(classification.city ?? ''),
+         message: await generalChat(history, userInput),
       };
    }
 
-   if (classification.intent === 'math') {
-      const result = calculateMath(classification.expression ?? '');
+   if (classification.intent === 'getWeather') {
+      const city =
+         typeof classification.parameters.city === 'string'
+            ? classification.parameters.city
+            : '';
+      return {
+         id: crypto.randomUUID(),
+         message: await getWeather(city),
+      };
+   }
+
+   if (classification.intent === 'calculateMath') {
+      const inputNeedsTranslation = !isExpressionClean(userInput);
+      const rawExpression =
+         typeof classification.parameters.expression === 'string'
+            ? classification.parameters.expression
+            : userInput;
+      let expression = rawExpression;
+
+      if (inputNeedsTranslation) {
+         const translated = await translateMathExpression(userInput);
+         if (!translated) {
+            return {
+               id: crypto.randomUUID(),
+               message: 'לא הצלחתי לחשב את הביטוי שביקשת.',
+            };
+         }
+         expression = translated;
+      }
+
+      const result = calculateMath(expression);
       return {
          id: crypto.randomUUID(),
          message: Number.isFinite(result)
@@ -376,10 +434,18 @@ async function routeMessage(
       };
    }
 
-   if (classification.intent === 'exchange_rate') {
+   if (classification.intent === 'getExchangeRate') {
+      const from =
+         typeof classification.parameters.from === 'string'
+            ? classification.parameters.from
+            : '';
+      const to =
+         typeof classification.parameters.to === 'string'
+            ? classification.parameters.to
+            : 'ILS';
       return {
          id: crypto.randomUUID(),
-         message: getExchangeRate(classification.currencyCode ?? ''),
+         message: getExchangeRate(from, to),
       };
    }
 
