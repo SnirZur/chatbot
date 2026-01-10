@@ -362,6 +362,9 @@ async function classifyIntent(message: string): Promise<RouterResult> {
 
       console.log('Router raw JSON:', response.text);
       const parsed = parseRouterResult(response.text);
+      if (parsed) {
+         console.log('Router parsed JSON:', JSON.stringify(parsed, null, 2));
+      }
       if (!parsed) {
          return { intent: 'general', parameters: {}, confidence: 0 };
       }
