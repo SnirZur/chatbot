@@ -41,6 +41,7 @@ export const llmClient = {
       temperature = 0.2,
       maxTokens = 300,
       previousResponseId,
+      responseFormat,
    }: GenerateTextOptions): Promise<GenerateTextResult> {
       const response = await openAIClient.responses.create({
          model,
@@ -49,7 +50,6 @@ export const llmClient = {
          temperature,
          max_output_tokens: maxTokens,
          previous_response_id: previousResponseId,
-         response_format: responseFormat,
       });
 
       return {
