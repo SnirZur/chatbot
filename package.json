@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "bun run index.ts",
+    "services": "concurrently \"bun userInterface.ts\" \"bun memoryService.ts\" \"bun routerService.ts\" \"bun mathApp.ts\" \"bun weatherApp.ts\" \"bun exchangeApp.ts\" \"bun generalChatApp.ts\" \"bun responseAggregator.ts\"",
     "format": "prettier --write .",
     "prepare": "husky"
   },
