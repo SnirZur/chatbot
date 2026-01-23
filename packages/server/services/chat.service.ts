@@ -181,7 +181,9 @@ function calculateMath(expression: string): number {
       // @ts-ignore
       const isUnarySign =
          (char === '+' || char === '-') &&
-         (index === 0 || /[+\-*/]/.test(trimmed[index - 1]));
+         (index === 0 ||
+            (trimmed[index - 1] !== undefined &&
+               /[+\-*/]/.test(trimmed[index - 1]!)));
 
       // @ts-ignore
       if (/\d|\./.test(char) || isUnarySign) {
@@ -200,20 +202,23 @@ function calculateMath(expression: string): number {
       }
 
       // @ts-ignore
-      if (!/[+\-*/]/.test(char)) {
+      if (!/[+\-*\/]/.test(char)) {
          return Number.NaN;
       }
 
-      // @ts-ignore
       while (
          operators.length > 0 &&
-         precedence[operators[operators.length - 1]] >= precedence[char]
+         char &&
+         /[+\-*\/]/.test(char) &&
+         (precedence[operators[operators.length - 1]!] ?? 0) >=
+            (precedence[char] ?? 0)
       ) {
          applyOperator();
       }
 
-      // @ts-ignore
-      operators.push(char);
+      if (char) {
+         operators.push(char);
+      }
       index += 1;
    }
 
