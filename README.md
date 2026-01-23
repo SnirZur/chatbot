@@ -1,59 +1,99 @@
-# Build AI-Powered Apps
+# Kafka Microservices Chatbot
 
-This repository is an extension of https://github.com/mosh-hamedani/ai-powered-apps-course and includes the source files from that project, plus local additions.
+This project refactors the class chatbot into a Kafka-based microservices architecture using Bun.
 
-This repository contains the complete source code for the course **Build AI-Powered Apps**:
+## Services and Topics
 
-https://codewithmosh.com/p/build-ai-powered-apps
+| Service | Consumes | Produces |
+| --- | --- | --- |
+| `userInterface.ts` | `bot-responses` | `user-input-events`, `user-control-events` |
+| `memoryService.ts` | `user-input-events`, `app-results`, `user-control-events` | `conversation-history-update` |
+| `routerService.ts` | `user-input-events`, `conversation-history-update` | `intent-math`, `intent-weather`, `intent-exchange`, `intent-general-chat` |
+| `mathApp.ts` | `intent-math` | `app-results` |
+| `weatherApp.ts` | `intent-weather` | `app-results` |
+| `exchangeApp.ts` | `intent-exchange` | `app-results` |
+| `generalChatApp.ts` | `intent-general-chat` | `app-results` |
+| `responseAggregator.ts` | `app-results` | `bot-responses` |
 
+Kafka topics (exact names):
+- `user-input-events`
+- `app-results`
+- `bot-responses`
+- `user-control-events`
+- `intent-math`
+- `intent-weather`
+- `intent-exchange`
+- `intent-general-chat`
+- `conversation-history-update`
+- `conversation-history-request`
 
-## Local setup
+## Architecture (PlantUML)
 
-1) Install Bun: https://bun.sh
-2) Install dependencies (repo root):
+```plantuml
+@startuml
+actor User
 
+User -> "userInterface.ts"
+"userInterface.ts" --> "user-input-events"
+"userInterface.ts" --> "user-control-events"
+
+"user-input-events" --> "routerService.ts"
+"conversation-history-update" --> "routerService.ts"
+
+"routerService.ts" --> "intent-math"
+"routerService.ts" --> "intent-weather"
+"routerService.ts" --> "intent-exchange"
+"routerService.ts" --> "intent-general-chat"
+
+"intent-math" --> "mathApp.ts"
+"intent-weather" --> "weatherApp.ts"
+"intent-exchange" --> "exchangeApp.ts"
+"intent-general-chat" --> "generalChatApp.ts"
+
+"mathApp.ts" --> "app-results"
+"weatherApp.ts" --> "app-results"
+"exchangeApp.ts" --> "app-results"
+"generalChatApp.ts" --> "app-results"
+
+"app-results" --> "memoryService.ts"
+"user-input-events" --> "memoryService.ts"
+"user-control-events" --> "memoryService.ts"
+"memoryService.ts" --> "conversation-history-update"
+
+"app-results" --> "responseAggregator.ts"
+"responseAggregator.ts" --> "bot-responses"
+"bot-responses" --> "userInterface.ts"
+@enduml
 ```
-bun install
-```
 
-3) Start MySQL:
+## Running Locally
+
+1) Start Kafka + MySQL:
 
 ```
 docker compose up -d
 ```
 
-4) Create `packages/server/.env`:
+2) Install dependencies:
 
 ```
-OPENAI_API_KEY=sk-...
-DATABASE_URL="mysql://jennifer:jennifer@localhost:3306/ai_course"
-WEATHER_API_KEY=...
+bun install
 ```
 
-5) Run migrations:
+3) Run each service in its own terminal:
 
 ```
-cd packages/server
-bunx prisma migrate deploy
+bun userInterface.ts
+bun memoryService.ts
+bun routerService.ts
+bun mathApp.ts
+bun weatherApp.ts
+bun exchangeApp.ts
+bun generalChatApp.ts
+bun responseAggregator.ts
 ```
 
-6) Generate Prisma client:
+## Environment Variables
 
-```
-bunx prisma generate
-```
-
-7) Run the app (client + server):
-
-```
-cd ../..
-bun run dev
-```
-
-Client: http://localhost:5137
-Server: http://localhost:3000
-
-Router features:
-- The server routes weather, math, and exchange-rate queries to local handlers.
-- General chat uses the LLM with persisted conversation history.
-- Use `/reset` to clear the saved history.
+- `OPENAI_API_KEY` for `generalChatApp.ts`
+- `OPENWEATHER_API_KEY` for `weatherApp.ts`
