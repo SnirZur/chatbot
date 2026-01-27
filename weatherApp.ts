@@ -1,14 +1,22 @@
-import { createKafka, parseMessage } from './kafka';
-import { AppResultEvent, IntentWeatherEvent, topics } from './types';
+import './env';
+import {
+   createKafka,
+   createProducer,
+   ensureTopics,
+   parseMessage,
+   startConsumer,
+   waitForKafka,
+} from './kafka';
+import { type AppResultEvent, type IntentWeatherEvent, topics } from './types';
 
 const kafka = createKafka('weather-app');
 const consumer = kafka.consumer({ groupId: 'weather-app-group' });
-const producer = kafka.producer();
+const producer = createProducer(kafka);
 
 const getWeather = async (city: string): Promise<string> => {
-   const apiKey = process.env.OPENWEATHER_API_KEY;
+   const apiKey = process.env.WEATHER_API_KEY;
    if (!apiKey) {
-      return 'חסר מפתח API למזג אוויר. נא להגדיר OPENWEATHER_API_KEY.';
+      return 'חסר מפתח API למזג אוויר. נא להגדיר WEATHER_API_KEY.';
    }
 
    const trimmed = city.trim();
@@ -41,11 +49,16 @@ const getWeather = async (city: string): Promise<string> => {
    }
 };
 
+await waitForKafka(kafka);
+await ensureTopics(kafka, [topics.intentWeather, topics.appResults]);
+
 await producer.connect();
 await consumer.connect();
 await consumer.subscribe({ topic: topics.intentWeather, fromBeginning: true });
 
-consumer.run({
+startConsumer({
+   consumer,
+   label: 'weather-app',
    eachMessage: async ({ message }) => {
       const parsed = parseMessage<IntentWeatherEvent>(message);
       if (!parsed) return;

@@ -1,10 +1,16 @@
+import './env';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { createKafka, parseMessage } from './kafka';
-import { topics, UserControlEvent, UserInputEvent } from './types';
+import {
+   createKafka,
+   createProducer,
+   parseMessage,
+   startConsumer,
+} from './kafka';
+import { topics, type UserControlEvent, type UserInputEvent } from './types';
 
 const kafka = createKafka('ui-service');
-const producer = kafka.producer();
+const producer = createProducer(kafka);
 const consumer = kafka.consumer({ groupId: 'ui-service-group' });
 
 const historyFile = Bun.file('history.json');
@@ -25,7 +31,9 @@ await producer.connect();
 await consumer.connect();
 await consumer.subscribe({ topic: topics.botResponses, fromBeginning: true });
 
-consumer.run({
+startConsumer({
+   consumer,
+   label: 'ui-service',
    eachMessage: async ({ message }) => {
       const parsed = parseMessage<{ message: string }>(message);
       if (!parsed || parsed.key !== userId) return;

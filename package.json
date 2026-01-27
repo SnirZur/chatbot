@@ -5,7 +5,9 @@
   "private": true,
   "scripts": {
     "dev": "bun run index.ts",
-    "services": "concurrently \"bun userInterface.ts\" \"bun memoryService.ts\" \"bun routerService.ts\" \"bun mathApp.ts\" \"bun weatherApp.ts\" \"bun exchangeApp.ts\" \"bun generalChatApp.ts\" \"bun responseAggregator.ts\"",
+    "services": "concurrently \"bun memoryService.ts\" \"bun routerService.ts\" \"bun mathApp.ts\" \"bun weatherApp.ts\" \"bun exchangeApp.ts\" \"bun generalChatApp.ts\" \"bun responseAggregator.ts\"",
+    "services:cli": "concurrently \"bun userInterface.ts\" \"bun memoryService.ts\" \"bun routerService.ts\" \"bun mathApp.ts\" \"bun weatherApp.ts\" \"bun exchangeApp.ts\" \"bun generalChatApp.ts\" \"bun responseAggregator.ts\"",
+    "full": "concurrently \"bun run services\" \"bun --cwd packages/server run dev\" \"bun --cwd packages/client run dev\"",
     "format": "prettier --write .",
     "prepare": "husky"
   },

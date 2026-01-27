@@ -1,9 +1,17 @@
-import { createKafka, parseMessage } from './kafka';
+import './env';
+import {
+   createKafka,
+   createProducer,
+   ensureTopics,
+   parseMessage,
+   startConsumer,
+   waitForKafka,
+} from './kafka';
 import { AppResultEvent, IntentExchangeEvent, topics } from './types';
 
 const kafka = createKafka('exchange-app');
 const consumer = kafka.consumer({ groupId: 'exchange-app-group' });
-const producer = kafka.producer();
+const producer = createProducer(kafka);
 
 const getExchangeRate = (currencyCode: string): string => {
    const normalized = currencyCode.trim().toUpperCase();
@@ -25,11 +33,16 @@ const getExchangeRate = (currencyCode: string): string => {
    return `שער ${label} היציג הוא ${rate} ש"ח`;
 };
 
+await waitForKafka(kafka);
+await ensureTopics(kafka, [topics.intentExchange, topics.appResults]);
+
 await producer.connect();
 await consumer.connect();
 await consumer.subscribe({ topic: topics.intentExchange, fromBeginning: true });
 
-consumer.run({
+startConsumer({
+   consumer,
+   label: 'exchange-app',
    eachMessage: async ({ message }) => {
       const parsed = parseMessage<IntentExchangeEvent>(message);
       if (!parsed) return;

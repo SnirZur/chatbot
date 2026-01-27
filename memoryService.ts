@@ -1,17 +1,25 @@
 import path from 'path';
-import { createKafka, parseMessage } from './kafka';
+import './env';
 import {
-   AppResultEvent,
-   ConversationHistory,
-   HistoryUpdateEvent,
+   createKafka,
+   createProducer,
+   ensureTopics,
+   parseMessage,
+   startConsumer,
+   waitForKafka,
+} from './kafka';
+import {
+   type AppResultEvent,
+   type ConversationHistory,
+   type HistoryUpdateEvent,
    topics,
-   UserControlEvent,
-   UserInputEvent,
+   type UserControlEvent,
+   type UserInputEvent,
 } from './types';
 
 const kafka = createKafka('memory-service');
 const consumer = kafka.consumer({ groupId: 'memory-service-group' });
-const producer = kafka.producer();
+const producer = createProducer(kafka);
 
 const historyFilePath = path.resolve('history.json');
 const historyMap = new Map<string, ConversationHistory>();
@@ -57,6 +65,14 @@ const publishHistory = async (userId: string) => {
 
 await loadHistory();
 
+await waitForKafka(kafka);
+await ensureTopics(kafka, [
+   topics.userInput,
+   topics.appResults,
+   topics.userControl,
+   topics.historyUpdate,
+]);
+
 await producer.connect();
 await consumer.connect();
 await consumer.subscribe({ topic: topics.userInput, fromBeginning: true });
@@ -67,7 +83,9 @@ for (const userId of historyMap.keys()) {
    await publishHistory(userId);
 }
 
-consumer.run({
+startConsumer({
+   consumer,
+   label: 'memory-service',
    eachMessage: async ({ topic, message }) => {
       const key = message.key?.toString() ?? '';
       if (!key) return;

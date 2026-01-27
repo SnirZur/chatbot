@@ -1,15 +1,28 @@
-import { createKafka, parseMessage } from './kafka';
+import './env';
+import {
+   createKafka,
+   createProducer,
+   ensureTopics,
+   parseMessage,
+   startConsumer,
+   waitForKafka,
+} from './kafka';
 import { AppResultEvent, topics } from './types';
 
 const kafka = createKafka('response-aggregator');
 const consumer = kafka.consumer({ groupId: 'response-aggregator-group' });
-const producer = kafka.producer();
+const producer = createProducer(kafka);
+
+await waitForKafka(kafka);
+await ensureTopics(kafka, [topics.appResults, topics.botResponses]);
 
 await producer.connect();
 await consumer.connect();
 await consumer.subscribe({ topic: topics.appResults, fromBeginning: true });
 
-consumer.run({
+startConsumer({
+   consumer,
+   label: 'response-aggregator',
    eachMessage: async ({ message }) => {
       const parsed = parseMessage<AppResultEvent>(message);
       if (!parsed) return;

@@ -1,9 +1,17 @@
-import { createKafka, parseMessage } from './kafka';
-import { AppResultEvent, IntentMathEvent, topics } from './types';
+import './env';
+import {
+   createKafka,
+   createProducer,
+   ensureTopics,
+   parseMessage,
+   startConsumer,
+   waitForKafka,
+} from './kafka';
+import { type AppResultEvent, type IntentMathEvent, topics } from './types';
 
 const kafka = createKafka('math-app');
 const consumer = kafka.consumer({ groupId: 'math-app-group' });
-const producer = kafka.producer();
+const producer = createProducer(kafka);
 
 const calculateMath = (expression: string): number => {
    const trimmed = expression.replace(/\s+/g, '');
@@ -47,14 +55,15 @@ const calculateMath = (expression: string): number => {
    let index = 0;
    while (index < trimmed.length) {
       const char = trimmed[index];
+      const prevChar = trimmed[index - 1] ?? '';
       const isUnary =
          (char === '+' || char === '-') &&
-         (index === 0 || /[+\-*/(]/.test(trimmed[index - 1]));
+         (index === 0 || /[+\-*/(]/.test(prevChar));
 
-      if (/\d|\./.test(char) || isUnary) {
+      if (/\d|\./.test(char ?? '') || isUnary) {
          let start = index;
          index += 1;
-         while (index < trimmed.length && /[\d.]/.test(trimmed[index])) {
+         while (index < trimmed.length && /[\d.]/.test(trimmed[index] ?? '')) {
             index += 1;
          }
          const value = Number(trimmed.slice(start, index));
@@ -99,11 +108,16 @@ const calculateMath = (expression: string): number => {
    return values.length === 1 ? values[0] : Number.NaN;
 };
 
+await waitForKafka(kafka);
+await ensureTopics(kafka, [topics.intentMath, topics.appResults]);
+
 await producer.connect();
 await consumer.connect();
 await consumer.subscribe({ topic: topics.intentMath, fromBeginning: true });
 
-consumer.run({
+startConsumer({
+   consumer,
+   label: 'math-app',
    eachMessage: async ({ message }) => {
       const parsed = parseMessage<IntentMathEvent>(message);
       if (!parsed) return;

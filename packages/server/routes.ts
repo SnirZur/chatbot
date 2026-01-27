@@ -13,6 +13,7 @@ router.get('/api/hello', (req: Request, res: Response) => {
    res.json({ message: 'Hello World!' });
 });
 
+router.get('/api/kafka/health', chatController.getKafkaHealth);
 router.get('/api/chat/history', chatController.getHistoryStatus);
 router.post('/api/chat', chatController.sendMessage);
 

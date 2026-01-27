@@ -9,9 +9,10 @@ export type ChatFormData = {
 
 type Props = {
    onSubmit: (data: ChatFormData) => void;
+   disabled?: boolean;
 };
 
-const ChatInput = ({ onSubmit }: Props) => {
+const ChatInput = ({ onSubmit, disabled = false }: Props) => {
    const { register, handleSubmit, reset, formState } = useForm<ChatFormData>();
 
    const submit = handleSubmit((data) => {
@@ -41,8 +42,12 @@ const ChatInput = ({ onSubmit }: Props) => {
             className="w-full border-0 focus:outline-0 resize-none"
             placeholder="Ask anything"
             maxLength={1000}
+            disabled={disabled}
          />
-         <Button disabled={!formState.isValid} className="rounded-full w-9 h-9">
+         <Button
+            disabled={!formState.isValid || disabled}
+            className="rounded-full w-9 h-9"
+         >
             <FaArrowUp />
          </Button>
       </form>
