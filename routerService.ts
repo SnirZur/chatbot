@@ -1,20 +1,44 @@
-import { createKafka, parseMessage } from './kafka';
+import './env';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
-   ConversationHistory,
-   HistoryUpdateEvent,
-   IntentExchangeEvent,
-   IntentGeneralChatEvent,
-   IntentMathEvent,
-   IntentWeatherEvent,
+   createKafka,
+   createProducer,
+   ensureTopics,
+   parseMessage,
+   startConsumer,
+   waitForKafka,
+} from './kafka';
+import {
+   type ConversationHistory,
+   type HistoryUpdateEvent,
+   type IntentExchangeEvent,
+   type IntentGeneralChatEvent,
+   type IntentMathEvent,
+   type IntentWeatherEvent,
    topics,
-   UserInputEvent,
+   type UserInputEvent,
 } from './types';
 
 const kafka = createKafka('router-service');
 const consumer = kafka.consumer({ groupId: 'router-service-group' });
-const producer = kafka.producer();
+const producer = createProducer(kafka);
 
 const historyCache = new Map<string, ConversationHistory>();
+const historyFilePath = path.resolve('history.json');
+
+const loadHistoryForUser = (userId: string): ConversationHistory => {
+   try {
+      if (!fs.existsSync(historyFilePath)) return [];
+      const raw = fs.readFileSync(historyFilePath, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, ConversationHistory>;
+      const history = parsed?.[userId];
+      return Array.isArray(history) ? history : [];
+   } catch (error) {
+      console.error('Failed to load history for user:', error);
+      return [];
+   }
+};
 
 const normalize = (text: string) => text.toLowerCase();
 
@@ -68,12 +92,24 @@ const extractCurrency = (input: string): string | null => {
    return null;
 };
 
+await waitForKafka(kafka);
+await ensureTopics(kafka, [
+   topics.userInput,
+   topics.historyUpdate,
+   topics.intentMath,
+   topics.intentWeather,
+   topics.intentExchange,
+   topics.intentGeneralChat,
+]);
+
 await producer.connect();
 await consumer.connect();
 await consumer.subscribe({ topic: topics.userInput, fromBeginning: true });
 await consumer.subscribe({ topic: topics.historyUpdate, fromBeginning: true });
 
-consumer.run({
+startConsumer({
+   consumer,
+   label: 'router-service',
    eachMessage: async ({ topic, message }) => {
       if (topic === topics.historyUpdate) {
          const parsed = parseMessage<HistoryUpdateEvent>(message);
@@ -130,7 +166,7 @@ consumer.run({
       }
 
       const payload: IntentGeneralChatEvent = {
-         context: historyCache.get(userId) ?? [],
+         context: historyCache.get(userId) ?? loadHistoryForUser(userId),
          userInput,
       };
       await producer.send({
