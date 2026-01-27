@@ -26,15 +26,31 @@ const ChatBot = () => {
    const [messages, setMessages] = useState<Message[]>([]);
    const [isBotTyping, setIsBotTyping] = useState(false);
    const [error, setError] = useState('');
-   const conversationId = useRef(crypto.randomUUID());
+   const [isReady, setIsReady] = useState(false);
+   const conversationId = useRef('');
+   const didPrompt = useRef(false);
+
+   useEffect(() => {
+      if (didPrompt.current) return;
+      didPrompt.current = true;
+      let inputId = '';
+      while (!inputId) {
+         inputId = window.prompt('Enter user id:')?.trim() ?? '';
+      }
+      conversationId.current = inputId;
+   }, []);
 
    useEffect(() => {
       let isActive = true;
 
       const loadHistoryStatus = async () => {
          try {
-            const { data } =
-               await axios.get<HistoryStatusResponse>('/api/chat/history');
+            const { data } = await axios.get<HistoryStatusResponse>(
+               '/api/chat/history',
+               {
+                  params: { conversationId: conversationId.current },
+               }
+            );
             if (isActive && data.hasHistory && data.message) {
                setMessages([{ content: data.message, role: 'bot' }]);
             }
@@ -46,6 +62,35 @@ const ChatBot = () => {
       loadHistoryStatus();
       return () => {
          isActive = false;
+      };
+   }, []);
+
+   useEffect(() => {
+      let isActive = true;
+      let intervalId: number | undefined;
+
+      const checkReady = async () => {
+         try {
+            const { data } = await axios.get<{ ready: boolean }>(
+               '/api/kafka/health'
+            );
+            if (!isActive) return;
+            if (data.ready) {
+               setIsReady(true);
+               if (intervalId) window.clearInterval(intervalId);
+            }
+         } catch (error) {
+            if (!isActive) return;
+            setIsReady(false);
+         }
+      };
+
+      checkReady();
+      intervalId = window.setInterval(checkReady, 2000);
+
+      return () => {
+         isActive = false;
+         if (intervalId) window.clearInterval(intervalId);
       };
    }, []);
 
@@ -77,10 +122,15 @@ const ChatBot = () => {
       <div className="flex flex-col h-full">
          <div className="flex flex-col flex-1 gap-3 mb-10 overflow-y-auto">
             <ChatMessages messages={messages} />
+            {!isReady && (
+               <p className="text-sm text-gray-500">
+                  ממתין להתחברות לשירותים...
+               </p>
+            )}
             {isBotTyping && <TypingIndicator />}
             {error && <p className="text-red-500">{error}</p>}
          </div>
-         <ChatInput onSubmit={onSubmit} />
+         <ChatInput onSubmit={onSubmit} disabled={!isReady} />
       </div>
    );
 };

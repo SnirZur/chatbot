@@ -1,14 +1,26 @@
+import './env';
 import OpenAI from 'openai';
-import { createKafka, parseMessage } from './kafka';
+import {
+   createKafka,
+   createProducer,
+   ensureTopics,
+   parseMessage,
+   startConsumer,
+   waitForKafka,
+} from './kafka';
 import { AppResultEvent, IntentGeneralChatEvent, topics } from './types';
 
 const kafka = createKafka('general-chat-app');
 const consumer = kafka.consumer({ groupId: 'general-chat-app-group' });
-const producer = kafka.producer();
+const producer = createProducer(kafka);
+const openaiApiKey = process.env.OPENAI_API_KEY ?? '';
+const openai = openaiApiKey ? new OpenAI({ apiKey: openaiApiKey }) : null;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const systemPrompt =
+   'אתה עוזר חכם וקצר בתשובותיו. השתמש בהיסטוריית השיחה שסופקה כדי לענות על שאלות על מה שנאמר קודם. אל תגיד שאין לך גישה להיסטוריה אם היא סופקה.';
 
-const systemPrompt = 'אתה עוזר חכם וקצר בתשובותיו. תן תשובות ברורות וממוקדות.';
+await waitForKafka(kafka);
+await ensureTopics(kafka, [topics.intentGeneralChat, topics.appResults]);
 
 await producer.connect();
 await consumer.connect();
@@ -17,7 +29,9 @@ await consumer.subscribe({
    fromBeginning: true,
 });
 
-consumer.run({
+startConsumer({
+   consumer,
+   label: 'general-chat-app',
    eachMessage: async ({ message }) => {
       const parsed = parseMessage<IntentGeneralChatEvent>(message);
       if (!parsed) return;
@@ -27,18 +41,24 @@ consumer.run({
          content: turn.content,
       }));
 
-      const response = await openai.chat.completions.create({
-         model: 'gpt-4o-mini',
-         messages: [
-            { role: 'system', content: systemPrompt },
-            ...contextMessages,
-            { role: 'user', content: parsed.value.userInput },
-         ],
-         temperature: 0.2,
-         max_tokens: 200,
-      });
+      const result = await (async () => {
+         if (!openai) {
+            return 'חסר OPENAI_API_KEY כדי להריץ שיחה כללית.';
+         }
 
-      const result = response.choices[0]?.message?.content ?? '';
+         const response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+               { role: 'system', content: systemPrompt },
+               ...contextMessages,
+               { role: 'user', content: parsed.value.userInput },
+            ],
+            temperature: 0.2,
+            max_tokens: 200,
+         });
+
+         return response.choices[0]?.message?.content ?? '';
+      })();
       const payload: AppResultEvent = { type: 'chat', result };
 
       await producer.send({
