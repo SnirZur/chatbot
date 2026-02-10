@@ -25,3 +25,27 @@ System: ברוך שובך! טענתי את היסטוריית השיחה הקו�
 User: מה שאלתי על התפוחים?
 Server log: Router raw JSON: {"intent":"general","parameters":{},"confidence":0.81}
 Bot: שאלת על תפוחים, כמו בדיקת איכות ב-ETL, וסיכום התוצאה היה 13.
+
+Session 3
+User: מה מזג האוויר בפריז וכמה הדולר שווה היום?
+Server log: Router raw JSON: {"plan":[{"tool":"getWeather","parameters":{"city":"פריז"}},{"tool":"getExchangeRate","parameters":{"from":"USD","to":"ILS"}}],"final_answer_synthesis_required":true}
+Server log: Router parsed JSON: {"plan":[{"tool":"getWeather","parameters":{"city":"פריז"}},{"tool":"getExchangeRate","parameters":{"from":"USD","to":"ILS"}}],"final_answer_synthesis_required":true}
+Server log: Tool 1 result: 14 מעלות, מעונן חלקית
+Server log: Tool 2 result: שער הדולר היציג הוא 3.75 ש״ח
+Bot: בפריז כרגע 14 מעלות עם עננות חלקית, ושער הדולר היציג הוא 3.75 ש״ח.
+
+Session 4
+User: הנה ביקורת קצרה: "קפה חלש ורועש" — תנתח ותתן מידע על מכונת הקפה BrewMaster 360
+Server log: Router raw JSON: {"plan":[{"tool":"analyzeReview","parameters":{"review_text":"קפה חלש ורועש"}},{"tool":"getProductInformation","parameters":{"product_name":"BrewMaster 360","query":"summary, known issues, maintenance"}},{"tool":"generalChat","parameters":{"message":"סכם את הניתוח ואת מידע המוצר יחד עם המלצה קצרה. השתמש ב:<result_from_tool_1> ו-<result_from_tool_2>"}}],"final_answer_synthesis_required":false}
+Server log: Router parsed JSON: {"plan":[{"tool":"analyzeReview","parameters":{"review_text":"קפה חלש ורועש"}},{"tool":"getProductInformation","parameters":{"product_name":"BrewMaster 360","query":"summary, known issues, maintenance"}},{"tool":"generalChat","parameters":{"message":"סכם את הניתוח ואת מידע המוצר יחד עם המלצה קצרה. השתמש ב:<result_from_tool_1> ו-<result_from_tool_2>"}}],"final_answer_synthesis_required":false}
+Server log: Tool 1 result: סנטימנט: שלילי. נקודות מרכזיות: קפה חלש, רועש בזמן פעולה.
+Server log: Tool 2 result (RAG grounded): מכונת BrewMaster 360 היא מכונת אספרסו/פילטר עם מיכל 1.6 ל׳, משאבה 19 בר, חימום 12 דקות. תחזוקה: שטיפה אחרי שימוש, הסרת אבנית כל 6-8 שבועות, ניקוי מסך מקלחת חודשי. רעש משאבה 68dB.
+Bot: הביקורת שלילית (קפה חלש ורעש). לפי המפרט, זו מכונת אספרסו/פילטר עם משאבת 19 בר ומיכל 1.6 ל׳, ודורשת שטיפה אחרי שימוש והסרת אבנית כל 6–8 שבועות. אם הרעש קריטי לך, שים לב שהמשאבה סביב 68dB.
+
+Session 5
+User: ליוסי יש 100 ש״ח, מוצר X עולה 25 דולר — כמה יישאר לו?
+Server log: Router raw JSON: {"plan":[{"tool":"getExchangeRate","parameters":{"from":"USD","to":"ILS"}},{"tool":"calculateMath","parameters":{"expression":"100 - (25 * <result_from_tool_1>)"}}],"final_answer_synthesis_required":true}
+Server log: Router parsed JSON: {"plan":[{"tool":"getExchangeRate","parameters":{"from":"USD","to":"ILS"}},{"tool":"calculateMath","parameters":{"expression":"100 - (25 * <result_from_tool_1>)"}}],"final_answer_synthesis_required":true}
+Server log: Tool 1 result: שער הדולר היציג הוא 3.75 ש״ח
+Server log: Tool 2 result: התוצאה היא 6.25
+Bot: לפי שער 3.75 ש״ח לדולר, מוצר ב-25 דולר עולה 93.75 ש״ח ולכן יישארו 6.25 ש״ח.
