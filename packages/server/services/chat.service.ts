@@ -1,6 +1,14 @@
 import path from 'path';
 import { llmClient } from '../llm/client';
 import {
+   debugEnabled,
+   logError,
+   logLine,
+   logPhase,
+   preview,
+   safeJson,
+} from '../logger';
+import {
    analyzeReviewPrompt,
    generalChatPrompt,
    mathTranslatorPrompt,
@@ -19,6 +27,12 @@ const historyFilePath = path.resolve(
 const history: Message[] = [];
 const historyWelcomeMessage = 'ברוך שובך! טענתי את היסטוריית השיחה הקודמת.';
 let hasPersistedHistory = false;
+let requestCounter = 0;
+
+function nextRequestId(): string {
+   requestCounter += 1;
+   return `req-${String(requestCounter).padStart(3, '0')}`;
+}
 
 async function loadHistory() {
    try {
@@ -95,7 +109,7 @@ type RouterPlan = {
    final_answer_synthesis_required: boolean;
 };
 
-async function getWeather(city: string): Promise<string> {
+async function getWeather(city: string, reqId: string): Promise<string> {
    const apiKey = process.env.WEATHER_API_KEY;
    if (!apiKey) {
       return 'לא הצלחתי להביא את הנתונים על מזג האוויר כרגע, נסה שוב מאוחר יותר.';
@@ -108,6 +122,7 @@ async function getWeather(city: string): Promise<string> {
 
    const controller = new AbortController();
    const timeout = setTimeout(() => controller.abort(), 5000);
+   const startTime = Date.now();
 
    try {
       const url = new URL('https://api.openweathermap.org/data/2.5/weather');
@@ -117,6 +132,10 @@ async function getWeather(city: string): Promise<string> {
       url.searchParams.set('lang', 'he');
 
       const response = await fetch(url, { signal: controller.signal });
+      logLine(
+         reqId,
+         `[HTTP] weather status=${response.status} duration=${Date.now() - startTime}ms city="${city}"`
+      );
       if (!response.ok) {
          throw new Error('Weather API request failed.');
       }
@@ -309,7 +328,8 @@ async function generalChat(
 
 async function getProductInformation(
    productName: string,
-   query: string
+   query: string,
+   reqId: string
 ): Promise<string> {
    const baseUrl =
       process.env.RAG_SERVICE_URL?.trim() || 'http://localhost:8000';
@@ -324,8 +344,15 @@ async function getProductInformation(
 
    const controller = new AbortController();
    const timeout = setTimeout(() => controller.abort(), 8000);
+   const startTime = Date.now();
 
    try {
+      logPhase(reqId, 'RAG');
+      logLine(
+         reqId,
+         `[RAG] query="${preview(composedQuery)}" product="${preview(productName)}"`
+      );
+      logLine(reqId, '[RAG] calling python-service /search_kb');
       const response = await fetch(`${baseUrl}/search_kb`, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
@@ -333,12 +360,27 @@ async function getProductInformation(
          signal: controller.signal,
       });
 
+      logLine(
+         reqId,
+         `[RAG] http_status=${response.status} duration=${Date.now() - startTime}ms`
+      );
       if (!response.ok) {
          throw new Error(`RAG service error: ${response.status}`);
       }
 
       const data = (await response.json()) as { chunks?: string[] };
       const chunks = Array.isArray(data.chunks) ? data.chunks : [];
+
+      logLine(reqId, `[RAG] chunks_received=${chunks.length}`);
+      if (debugEnabled()) {
+         chunks.slice(0, 3).forEach((chunk, index) => {
+            logLine(reqId, `[RAG.chunk${index + 1}] "${preview(chunk)}"`);
+         });
+      }
+      logLine(
+         reqId,
+         '[RAG] Embeddings computed in python-service (not logged here)'
+      );
 
       if (chunks.length === 0) {
          return 'לא מצאתי מידע רלוונטי במאגר.';
@@ -353,6 +395,7 @@ async function getProductInformation(
          null,
          2
       );
+      logLine(reqId, `[RAG] context_preview="${preview(ragPayload)}"`);
 
       const generation = await llmClient.generateText({
          model: 'gpt-4o-mini',
@@ -364,7 +407,10 @@ async function getProductInformation(
 
       return generation.text.trim();
    } catch (error) {
-      console.error(error);
+      logError(
+         reqId,
+         `[RAG] ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
       return 'לא הצלחתי להביא מידע על המוצר כרגע, נסה שוב מאוחר יותר.';
    } finally {
       clearTimeout(timeout);
@@ -450,8 +496,18 @@ async function translateMathExpression(
    return expression;
 }
 
-async function classifyPlan(message: string): Promise<RouterPlan> {
+type PlanResult = {
+   plan: RouterPlan;
+   rawText: string;
+   durationMs: number;
+};
+
+async function classifyPlan(
+   message: string,
+   reqId: string
+): Promise<PlanResult> {
    try {
+      const startTime = Date.now();
       const response = await llmClient.generateText({
          model: 'gpt-4o-mini',
          instructions: routerPrompt,
@@ -461,19 +517,27 @@ async function classifyPlan(message: string): Promise<RouterPlan> {
          responseFormat: { type: 'json_object' },
       });
 
-      console.log('Router raw JSON:', response.text);
+      const durationMs = Date.now() - startTime;
       const parsed = parseRouterPlan(response.text);
-      if (parsed) {
-         console.log('Router parsed JSON:', JSON.stringify(parsed, null, 2));
-      }
       if (!parsed) {
-         return { plan: [], final_answer_synthesis_required: false };
+         return {
+            plan: { plan: [], final_answer_synthesis_required: false },
+            rawText: response.text,
+            durationMs,
+         };
       }
 
-      return parsed;
+      return { plan: parsed, rawText: response.text, durationMs };
    } catch (error) {
-      console.error('Classifier failed:', error);
-      return { plan: [], final_answer_synthesis_required: false };
+      logError(
+         reqId,
+         `Planner failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+      return {
+         plan: { plan: [], final_answer_synthesis_required: false },
+         rawText: '',
+         durationMs: 0,
+      };
    }
 }
 
@@ -482,6 +546,8 @@ async function routeMessage(
    userInput: string,
    _conversationId: string
 ): Promise<ChatResponse> {
+   const reqId = nextRequestId();
+   logLine(reqId, `[REQ] user="${preview(userInput)}"`);
    if (userInput.trim() === '/reset') {
       await resetHistory();
       return {
@@ -490,9 +556,21 @@ async function routeMessage(
       };
    }
 
-   const planResult = await classifyPlan(userInput);
+   const planResult = await classifyPlan(userInput, reqId);
+   logPhase(reqId, 'PLAN');
+   logLine(reqId, `[PLAN] raw="${preview(planResult.rawText)}"`);
+   logLine(
+      reqId,
+      `[PLAN] steps=${planResult.plan.plan.length} synth=${planResult.plan.final_answer_synthesis_required} duration=${planResult.durationMs}ms`
+   );
+   planResult.plan.plan.forEach((step, index) => {
+      logLine(
+         reqId,
+         `Step ${index + 1}: tool=${step.tool} params=${safeJson(step.parameters)}`
+      );
+   });
 
-   if (planResult.plan.length === 0) {
+   if (planResult.plan.plan.length === 0) {
       return {
          id: crypto.randomUUID(),
          message: await generalChat(history, userInput),
@@ -507,7 +585,8 @@ async function routeMessage(
 
    const resolvePlaceholders = (
       value: unknown,
-      results: ToolResult[]
+      results: ToolResult[],
+      reqId: string
    ): unknown => {
       if (typeof value === 'string') {
          return value.replace(/<result_from_tool_(\d+)>/g, (_match, index) => {
@@ -515,6 +594,12 @@ async function routeMessage(
             if (!result) {
                return '';
             }
+            logLine(
+               reqId,
+               `[SUBST] <result_from_tool_${index}> -> "${preview(
+                  result.data ?? result.text
+               )}"`
+            );
             if (typeof result.data === 'number') {
                return String(result.data);
             }
@@ -526,14 +611,14 @@ async function routeMessage(
       }
 
       if (Array.isArray(value)) {
-         return value.map((item) => resolvePlaceholders(item, results));
+         return value.map((item) => resolvePlaceholders(item, results, reqId));
       }
 
       if (value && typeof value === 'object') {
          const entries = Object.entries(value as Record<string, unknown>);
          const resolved: Record<string, unknown> = {};
          for (const [key, nested] of entries) {
-            resolved[key] = resolvePlaceholders(nested, results);
+            resolved[key] = resolvePlaceholders(nested, results, reqId);
          }
          return resolved;
       }
@@ -543,124 +628,229 @@ async function routeMessage(
 
    const results: ToolResult[] = [];
 
-   for (const step of planResult.plan) {
+   logPhase(reqId, 'EXECUTION');
+   const totalSteps = planResult.plan.plan.length;
+
+   for (const [index, step] of planResult.plan.plan.entries()) {
+      const stepNumber = index + 1;
+      const stepStart = Date.now();
+
       const resolvedParameters = resolvePlaceholders(
          step.parameters,
-         results
+         results,
+         reqId
       ) as Record<string, unknown>;
 
-      if (step.tool === 'getWeather') {
-         const city =
-            typeof resolvedParameters.city === 'string'
-               ? resolvedParameters.city
-               : '';
-         const weather = await getWeather(city);
-         results.push({ tool: step.tool, text: weather, data: weather });
-         continue;
-      }
+      logLine(
+         reqId,
+         `Executing step ${stepNumber}/${totalSteps}: tool=${step.tool} params=${safeJson(
+            resolvedParameters
+         )}`
+      );
 
-      if (step.tool === 'calculateMath') {
-         const rawExpression =
-            typeof resolvedParameters.expression === 'string'
-               ? resolvedParameters.expression
-               : '';
-         let expression = rawExpression;
-
-         if (!isExpressionClean(expression)) {
-            const translated = await translateMathExpression(rawExpression);
-            if (!translated) {
-               results.push({
-                  tool: step.tool,
-                  text: 'לא הצלחתי לחשב את הביטוי שביקשת.',
-               });
-               continue;
-            }
-            expression = translated;
-         }
-
-         const result = calculateMath(expression);
-         if (!Number.isFinite(result)) {
-            results.push({
-               tool: step.tool,
-               text: 'לא הצלחתי לחשב את הביטוי שביקשת.',
-            });
+      try {
+         if (step.tool === 'getWeather') {
+            const city =
+               typeof resolvedParameters.city === 'string'
+                  ? resolvedParameters.city
+                  : '';
+            const weather = await getWeather(city, reqId);
+            results.push({ tool: step.tool, text: weather, data: weather });
+            logLine(
+               reqId,
+               `Step ${stepNumber}/${totalSteps} result="${preview(
+                  weather
+               )}" duration=${Date.now() - stepStart}ms`
+            );
             continue;
          }
 
+         if (step.tool === 'calculateMath') {
+            const rawExpression =
+               typeof resolvedParameters.expression === 'string'
+                  ? resolvedParameters.expression
+                  : '';
+            let expression = rawExpression;
+
+            if (!isExpressionClean(expression)) {
+               const translated = await translateMathExpression(rawExpression);
+               if (!translated) {
+                  const fallback = 'לא הצלחתי לחשב את הביטוי שביקשת.';
+                  results.push({
+                     tool: step.tool,
+                     text: fallback,
+                  });
+                  logError(
+                     reqId,
+                     `Step ${stepNumber} tool=${step.tool} failed: translation failed (fallback="${fallback}")`
+                  );
+                  logLine(
+                     reqId,
+                     `Step ${stepNumber}/${totalSteps} result="${preview(
+                        fallback
+                     )}" duration=${Date.now() - stepStart}ms`
+                  );
+                  continue;
+               }
+               expression = translated;
+            }
+
+            const result = calculateMath(expression);
+            if (!Number.isFinite(result)) {
+               const fallback = 'לא הצלחתי לחשב את הביטוי שביקשת.';
+               results.push({
+                  tool: step.tool,
+                  text: fallback,
+               });
+               logError(
+                  reqId,
+                  `Step ${stepNumber} tool=${step.tool} failed: invalid result (fallback="${fallback}")`
+               );
+               logLine(
+                  reqId,
+                  `Step ${stepNumber}/${totalSteps} result="${preview(
+                     fallback
+                  )}" duration=${Date.now() - stepStart}ms`
+               );
+               continue;
+            }
+
+            const responseText = `התוצאה היא ${result}`;
+            results.push({
+               tool: step.tool,
+               text: responseText,
+               data: result,
+            });
+            logLine(
+               reqId,
+               `Step ${stepNumber}/${totalSteps} result="${preview(
+                  responseText
+               )}" duration=${Date.now() - stepStart}ms`
+            );
+            continue;
+         }
+
+         if (step.tool === 'getExchangeRate') {
+            const from =
+               typeof resolvedParameters.from === 'string'
+                  ? resolvedParameters.from
+                  : '';
+            const to =
+               typeof resolvedParameters.to === 'string'
+                  ? resolvedParameters.to
+                  : 'ILS';
+            const exchange = getExchangeRate(from, to);
+            results.push({
+               tool: step.tool,
+               text: exchange.text,
+               data: exchange.rate ?? exchange.text,
+            });
+            logLine(
+               reqId,
+               `Step ${stepNumber}/${totalSteps} result="${preview(
+                  exchange.text
+               )}" duration=${Date.now() - stepStart}ms`
+            );
+            continue;
+         }
+
+         if (step.tool === 'generalChat') {
+            const message =
+               typeof resolvedParameters.message === 'string'
+                  ? resolvedParameters.message
+                  : userInput;
+            const response = await generalChat(history, message);
+            results.push({ tool: step.tool, text: response, data: response });
+            logLine(
+               reqId,
+               `Step ${stepNumber}/${totalSteps} result="${preview(
+                  response
+               )}" duration=${Date.now() - stepStart}ms`
+            );
+            continue;
+         }
+
+         if (step.tool === 'analyzeReview') {
+            const reviewText =
+               typeof resolvedParameters.review_text === 'string'
+                  ? resolvedParameters.review_text
+                  : '';
+            const response = await llmClient.generateText({
+               model: 'gpt-4o-mini',
+               instructions: analyzeReviewPrompt,
+               prompt: reviewText,
+               temperature: 0.2,
+               maxTokens: 120,
+            });
+            results.push({
+               tool: step.tool,
+               text: response.text,
+               data: response.text,
+            });
+            logLine(
+               reqId,
+               `Step ${stepNumber}/${totalSteps} result="${preview(
+                  response.text
+               )}" duration=${Date.now() - stepStart}ms`
+            );
+            continue;
+         }
+
+         if (step.tool === 'getProductInformation') {
+            const productName =
+               typeof resolvedParameters.product_name === 'string'
+                  ? resolvedParameters.product_name
+                  : '';
+            const query =
+               typeof resolvedParameters.query === 'string'
+                  ? resolvedParameters.query
+                  : '';
+            const response = await getProductInformation(
+               productName,
+               query,
+               reqId
+            );
+            results.push({ tool: step.tool, text: response, data: response });
+            logLine(
+               reqId,
+               `Step ${stepNumber}/${totalSteps} result="${preview(
+                  response
+               )}" duration=${Date.now() - stepStart}ms`
+            );
+            continue;
+         }
+
+         const fallback = 'הכלי שביקשת עדיין לא זמין.';
          results.push({
             tool: step.tool,
-            text: `התוצאה היא ${result}`,
-            data: result,
+            text: fallback,
          });
-         continue;
+         logError(
+            reqId,
+            `Step ${stepNumber} tool=${step.tool} failed: unknown tool (fallback="${fallback}")`
+         );
+         logLine(
+            reqId,
+            `Step ${stepNumber}/${totalSteps} result="${preview(
+               fallback
+            )}" duration=${Date.now() - stepStart}ms`
+         );
+      } catch (error) {
+         const fallback = 'אירעה שגיאה במהלך ביצוע הפעולה.';
+         results.push({ tool: step.tool, text: fallback });
+         logError(
+            reqId,
+            `Step ${stepNumber} tool=${step.tool} error=${
+               error instanceof Error ? error.message : 'Unknown error'
+            } (fallback="${fallback}")`
+         );
+         logLine(
+            reqId,
+            `Step ${stepNumber}/${totalSteps} result="${preview(
+               fallback
+            )}" duration=${Date.now() - stepStart}ms`
+         );
       }
-
-      if (step.tool === 'getExchangeRate') {
-         const from =
-            typeof resolvedParameters.from === 'string'
-               ? resolvedParameters.from
-               : '';
-         const to =
-            typeof resolvedParameters.to === 'string'
-               ? resolvedParameters.to
-               : 'ILS';
-         const exchange = getExchangeRate(from, to);
-         results.push({
-            tool: step.tool,
-            text: exchange.text,
-            data: exchange.rate ?? exchange.text,
-         });
-         continue;
-      }
-
-      if (step.tool === 'generalChat') {
-         const message =
-            typeof resolvedParameters.message === 'string'
-               ? resolvedParameters.message
-               : userInput;
-         const response = await generalChat(history, message);
-         results.push({ tool: step.tool, text: response, data: response });
-         continue;
-      }
-
-      if (step.tool === 'analyzeReview') {
-         const reviewText =
-            typeof resolvedParameters.review_text === 'string'
-               ? resolvedParameters.review_text
-               : '';
-         const response = await llmClient.generateText({
-            model: 'gpt-4o-mini',
-            instructions: analyzeReviewPrompt,
-            prompt: reviewText,
-            temperature: 0.2,
-            maxTokens: 120,
-         });
-         results.push({
-            tool: step.tool,
-            text: response.text,
-            data: response.text,
-         });
-         continue;
-      }
-
-      if (step.tool === 'getProductInformation') {
-         const productName =
-            typeof resolvedParameters.product_name === 'string'
-               ? resolvedParameters.product_name
-               : '';
-         const query =
-            typeof resolvedParameters.query === 'string'
-               ? resolvedParameters.query
-               : '';
-         const response = await getProductInformation(productName, query);
-         results.push({ tool: step.tool, text: response, data: response });
-         continue;
-      }
-
-      results.push({
-         tool: step.tool,
-         text: 'הכלי שביקשת עדיין לא זמין.',
-      });
    }
 
    if (results.length === 0) {
@@ -670,7 +860,8 @@ async function routeMessage(
       };
    }
 
-   if (planResult.final_answer_synthesis_required) {
+   if (planResult.plan.final_answer_synthesis_required) {
+      logPhase(reqId, 'SYNTHESIS');
       const synthesisPayload = JSON.stringify(
          {
             user_request: userInput,
@@ -683,7 +874,15 @@ async function routeMessage(
          null,
          2
       );
+      logLine(
+         reqId,
+         `[SYNTH] inputs=${results
+            .map((_result, index) => `tool_${index + 1}_result`)
+            .join(', ')}`
+      );
+      logLine(reqId, `[SYNTH] prompt_size_chars=${synthesisPayload.length}`);
 
+      const synthStart = Date.now();
       const synthesis = await llmClient.generateText({
          model: 'gpt-4o-mini',
          instructions: orchestrationSynthesisPrompt,
@@ -691,6 +890,7 @@ async function routeMessage(
          temperature: 0.2,
          maxTokens: 200,
       });
+      logLine(reqId, `[SYNTH] duration=${Date.now() - synthStart}ms`);
 
       return {
          id: crypto.randomUUID(),

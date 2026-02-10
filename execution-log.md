@@ -49,3 +49,27 @@ Server log: Router parsed JSON: {"plan":[{"tool":"getExchangeRate","parameters":
 Server log: Tool 1 result: שער הדולר היציג הוא 3.75 ש״ח
 Server log: Tool 2 result: התוצאה היא 6.25
 Bot: לפי שער 3.75 ש״ח לדולר, מוצר ב-25 דולר עולה 93.75 ש״ח ולכן יישארו 6.25 ש״ח.
+
+Session 6 (DEBUG_LOGS=true)
+User: הנה ביקורת קצרה: "קפה חלש ורועש" — תנתח ותתן מידע על מכונת הקפה BrewMaster 360
+Server log: [ORCH] [req-006] [REQ] user="הנה ביקורת קצרה: \"קפה חלש ורועש\" — תנתח ותתן מידע על מכונת הקפה BrewMaster 360"
+Server log: [ORCH] [req-006] === PLAN ===
+Server log: [ORCH] [req-006] [PLAN] raw="{\"plan\":[{\"tool\":\"analyzeReview\",\"parameters\":{\"review_text\":\"קפה חלש ורועש\"}},{\"tool\":\"getProductInformation\",\"parameters\":{\"product_name\":\"BrewMaster 360\",\"query\":\"summary, known issues, maintenance\"}}],\"final_answer_synthesis_required\":false}"
+Server log: [ORCH] [req-006] [PLAN] steps=2 synth=false duration=312ms
+Server log: [ORCH] [req-006] Step 1: tool=analyzeReview params={"review_text":"קפה חלש ורועש"}
+Server log: [ORCH] [req-006] Step 2: tool=getProductInformation params={"product_name":"BrewMaster 360","query":"summary, known issues, maintenance"}
+Server log: [ORCH] [req-006] === EXECUTION ===
+Server log: [ORCH] [req-006] Executing step 1/2: tool=analyzeReview params={"review_text":"קפה חלש ורועש"}
+Server log: [ORCH] [req-006] Step 1/2 result="סנטימנט: שלילי. נקודות מרכזיות: קפה חלש, רועש בזמן פעולה." duration=211ms
+Server log: [ORCH] [req-006] Executing step 2/2: tool=getProductInformation params={"product_name":"BrewMaster 360","query":"summary, known issues, maintenance"}
+Server log: [ORCH] [req-006] === RAG ===
+Server log: [ORCH] [req-006] [RAG] query="BrewMaster 360 - summary, known issues, maintenance" product="BrewMaster 360"
+Server log: [ORCH] [req-006] [RAG] calling python-service /search_kb
+Server log: [ORCH] [req-006] [RAG] http_status=200 duration=94ms
+Server log: [ORCH] [req-006] [RAG] chunks_received=3
+Server log: [ORCH] [req-006] [RAG.chunk1] "BrewMaster 360 is a fictional countertop espresso and drip hybrid..."
+Server log: [ORCH] [req-006] [RAG.chunk2] "Maintenance guidance: run a rinse cycle after each use..."
+Server log: [ORCH] [req-006] [RAG] Embeddings computed in python-service (not logged here)
+Server log: [ORCH] [req-006] [RAG] context_preview="{\"product\":\"BrewMaster 360\",\"user_query\":\"summary, known issues, maintenance\",\"knowledge_chunks\":[\"BrewMaster 360 is a fictional countertop espresso and drip hybrid...\"..."
+Server log: [ORCH] [req-006] Step 2/2 result="מכונת BrewMaster 360 היא מכונת אספרסו/פילטר עם מיכל 1.6 ל׳..." duration=482ms
+Bot: הביקורת שלילית (קפה חלש ורעש). לפי המפרט, זו מכונת אספרסו/פילטר עם משאבת 19 בר ומיכל 1.6 ל׳, ודורשת שטיפה אחרי שימוש והסרת אבנית כל 6–8 שבועות. אם הרעש קריטי לך, שים לב שהמשאבה סביב 68dB.
