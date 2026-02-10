@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List
 
 import chromadb
+from chromadb.config import Settings
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
@@ -32,7 +33,10 @@ class SearchResponse(BaseModel):
 def load_collection():
     global _collection
     os.makedirs(DB_DIR, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(DB_DIR))
+    client = chromadb.PersistentClient(
+        path=str(DB_DIR),
+        settings=Settings(anonymized_telemetry=False),
+    )
     _collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
 
