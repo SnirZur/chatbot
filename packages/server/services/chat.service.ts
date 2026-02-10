@@ -74,12 +74,22 @@ type Message = {
    content: string;
 };
 
-type Intent = 'getWeather' | 'calculateMath' | 'getExchangeRate' | 'general';
+type ToolName =
+   | 'getWeather'
+   | 'calculateMath'
+   | 'getExchangeRate'
+   | 'generalChat'
+   | 'getProductInformation'
+   | 'analyzeReview';
 
-type RouterResult = {
-   intent: Intent;
+type PlanStep = {
+   tool: ToolName;
    parameters: Record<string, unknown>;
-   confidence: number;
+};
+
+type RouterPlan = {
+   plan: PlanStep[];
+   final_answer_synthesis_required: boolean;
 };
 
 async function getWeather(city: string): Promise<string> {
@@ -293,36 +303,49 @@ function extractJson(text: string): string | null {
    return match ? match[0] : null;
 }
 
-function parseRouterResult(text: string): RouterResult | null {
+function parseRouterPlan(text: string): RouterPlan | null {
    const candidate = extractJson(text) ?? text;
    try {
-      const parsed = JSON.parse(candidate) as RouterResult;
+      const parsed = JSON.parse(candidate) as RouterPlan;
       if (
          !parsed ||
-         typeof parsed.intent !== 'string' ||
-         typeof parsed.confidence !== 'number' ||
-         parsed.confidence < 0 ||
-         parsed.confidence > 1 ||
-         typeof parsed.parameters !== 'object' ||
-         parsed.parameters === null
+         !Array.isArray(parsed.plan) ||
+         typeof parsed.final_answer_synthesis_required !== 'boolean'
       ) {
          return null;
       }
 
-      const intent = parsed.intent as Intent;
-      if (
-         intent !== 'getWeather' &&
-         intent !== 'calculateMath' &&
-         intent !== 'getExchangeRate' &&
-         intent !== 'general'
-      ) {
-         return null;
+      const allowedTools = new Set<ToolName>([
+         'getWeather',
+         'calculateMath',
+         'getExchangeRate',
+         'generalChat',
+         'getProductInformation',
+         'analyzeReview',
+      ]);
+
+      const plan: PlanStep[] = [];
+      for (const step of parsed.plan) {
+         if (
+            !step ||
+            typeof step.tool !== 'string' ||
+            !allowedTools.has(step.tool as ToolName) ||
+            typeof step.parameters !== 'object' ||
+            step.parameters === null ||
+            Array.isArray(step.parameters)
+         ) {
+            return null;
+         }
+         plan.push({
+            tool: step.tool as ToolName,
+            parameters: step.parameters as Record<string, unknown>,
+         });
       }
 
       return {
-         intent,
-         parameters: parsed.parameters,
-         confidence: parsed.confidence,
+         plan,
+         final_answer_synthesis_required:
+            parsed.final_answer_synthesis_required,
       };
    } catch (error) {
       console.error('Failed to parse router JSON:', error);
@@ -354,7 +377,7 @@ async function translateMathExpression(
    return expression;
 }
 
-async function classifyIntent(message: string): Promise<RouterResult> {
+async function classifyPlan(message: string): Promise<RouterPlan> {
    try {
       const response = await llmClient.generateText({
          model: 'gpt-4o-mini',
@@ -366,18 +389,18 @@ async function classifyIntent(message: string): Promise<RouterResult> {
       });
 
       console.log('Router raw JSON:', response.text);
-      const parsed = parseRouterResult(response.text);
+      const parsed = parseRouterPlan(response.text);
       if (parsed) {
          console.log('Router parsed JSON:', JSON.stringify(parsed, null, 2));
       }
       if (!parsed) {
-         return { intent: 'general', parameters: {}, confidence: 0 };
+         return { plan: [], final_answer_synthesis_required: false };
       }
 
       return parsed;
    } catch (error) {
       console.error('Classifier failed:', error);
-      return { intent: 'general', parameters: {}, confidence: 0 };
+      return { plan: [], final_answer_synthesis_required: false };
    }
 }
 
@@ -394,19 +417,20 @@ async function routeMessage(
       };
    }
 
-   const classification = await classifyIntent(userInput);
+   const planResult = await classifyPlan(userInput);
 
-   if (classification.confidence < 0.5) {
+   if (planResult.plan.length === 0) {
       return {
          id: crypto.randomUUID(),
          message: await generalChat(history, userInput),
       };
    }
 
-   if (classification.intent === 'getWeather') {
+   const firstStep = planResult.plan[0];
+   if (firstStep.tool === 'getWeather') {
       const city =
-         typeof classification.parameters.city === 'string'
-            ? classification.parameters.city
+         typeof firstStep.parameters.city === 'string'
+            ? firstStep.parameters.city
             : '';
       return {
          id: crypto.randomUUID(),
@@ -414,11 +438,11 @@ async function routeMessage(
       };
    }
 
-   if (classification.intent === 'calculateMath') {
+   if (firstStep.tool === 'calculateMath') {
       const inputNeedsTranslation = !isExpressionClean(userInput);
       const rawExpression =
-         typeof classification.parameters.expression === 'string'
-            ? classification.parameters.expression
+         typeof firstStep.parameters.expression === 'string'
+            ? firstStep.parameters.expression
             : userInput;
       let expression = rawExpression;
 
@@ -442,18 +466,39 @@ async function routeMessage(
       };
    }
 
-   if (classification.intent === 'getExchangeRate') {
+   if (firstStep.tool === 'getExchangeRate') {
       const from =
-         typeof classification.parameters.from === 'string'
-            ? classification.parameters.from
+         typeof firstStep.parameters.from === 'string'
+            ? firstStep.parameters.from
             : '';
       const to =
-         typeof classification.parameters.to === 'string'
-            ? classification.parameters.to
+         typeof firstStep.parameters.to === 'string'
+            ? firstStep.parameters.to
             : 'ILS';
       return {
          id: crypto.randomUUID(),
          message: getExchangeRate(from, to),
+      };
+   }
+
+   if (firstStep.tool === 'generalChat') {
+      const message =
+         typeof firstStep.parameters.message === 'string'
+            ? firstStep.parameters.message
+            : userInput;
+      return {
+         id: crypto.randomUUID(),
+         message: await generalChat(history, message),
+      };
+   }
+
+   if (
+      firstStep.tool === 'getProductInformation' ||
+      firstStep.tool === 'analyzeReview'
+   ) {
+      return {
+         id: crypto.randomUUID(),
+         message: 'הכלי שביקשת עדיין לא זמין.',
       };
    }
 
