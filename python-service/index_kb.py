@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+import glob
 import os
-os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Tuple

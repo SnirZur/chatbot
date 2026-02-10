@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
-
 from pathlib import Path
 from typing import List
 
