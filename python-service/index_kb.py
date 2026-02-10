@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Iterable, List, Tuple
 
 import chromadb
-from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "products"
@@ -60,10 +59,7 @@ def build_chunks(docs: List[Tuple[str, str]]) -> List[Chunk]:
 
 def main() -> None:
     os.makedirs(DB_DIR, exist_ok=True)
-    client = chromadb.PersistentClient(
-        path=str(DB_DIR),
-        settings=Settings(anonymized_telemetry=False),
-    )
+    client = chromadb.PersistentClient(path=str(DB_DIR))
     try:
         client.delete_collection(COLLECTION_NAME)
     except Exception:
