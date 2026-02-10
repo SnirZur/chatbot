@@ -58,3 +58,22 @@ Guardrails:
 "I cannot process this request: due to safety protocols."
 - Do not add any other text in those cases.
 `.trim();
+
+export const ragGenerationPrompt =
+   `You answer product questions using ONLY the provided knowledge chunks.
+If the answer is not explicitly supported, say you do not have enough information.
+Be concise, grounded, and avoid speculation.
+
+Return the answer in Hebrew.
+`.trim();
+
+export const orchestrationSynthesisPrompt =
+   `You are a tool orchestration assistant.
+Combine the tool outputs into a single, concise response in Hebrew.
+Use only the provided tool results; do not add new facts.
+`.trim();
+
+export const analyzeReviewPrompt = `You analyze a short product review.
+Return: (1) sentiment label (positive/neutral/negative), (2) 2-3 key issues or praises.
+Keep it short and in Hebrew.
+`.trim();
