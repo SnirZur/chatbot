@@ -1,0 +1,7 @@
+PrintForge Mini is a fictional desktop 3D printer with a 180 x 180 x 180 mm build volume. It uses an FDM extruder with a 0.4 mm nozzle and supports PLA, PETG, and TPU. The printer has a heated bed up to 90°C and a direct-drive extruder.
+
+Recommended print speed is 40-80 mm/s, with maximum 120 mm/s for rough prototypes. Layer heights between 0.12 and 0.28 mm are supported. The printer includes auto bed leveling with a 9-point probe.
+
+Connectivity options include USB-C and Wi-Fi. Prints can be uploaded via a local web dashboard. The onboard screen is a 3.5-inch color touch panel. Firmware updates are delivered over Wi-Fi.
+
+Maintenance notes: clean the nozzle every 100 print hours, re-tension belts every 3 months, and lubricate Z-axis rods quarterly. The manual warns to keep the printer in a dust-free environment and to avoid drafts during ABS printing.

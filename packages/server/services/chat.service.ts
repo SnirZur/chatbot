@@ -304,6 +304,79 @@ async function generalChat(
    return response.text;
 }
 
+const ragGenerationPrompt =
+   'You answer product questions using ONLY the provided knowledge chunks. If the answer is not explicitly supported, say you do not have enough information. Be concise, grounded, and avoid speculation. Return the answer in Hebrew.';
+
+const orchestrationSynthesisPrompt =
+   'You are a tool orchestration assistant. Combine the tool outputs into a single, concise response in Hebrew. Use only the provided tool results; do not add new facts.';
+
+const analyzeReviewPrompt =
+   'You analyze a short product review. Return: (1) sentiment label (positive/neutral/negative), (2) 2-3 key issues or praises. Keep it short and in Hebrew.';
+
+async function getProductInformation(
+   productName: string,
+   query: string
+): Promise<string> {
+   const baseUrl =
+      process.env.RAG_SERVICE_URL?.trim() || 'http://localhost:8000';
+   const composedQuery = [productName, query]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(' - ');
+
+   if (!composedQuery) {
+      return 'לא הועברו פרטים מספיקים כדי לחפש מידע על המוצר.';
+   }
+
+   const controller = new AbortController();
+   const timeout = setTimeout(() => controller.abort(), 8000);
+
+   try {
+      const response = await fetch(`${baseUrl}/search_kb`, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ query: composedQuery }),
+         signal: controller.signal,
+      });
+
+      if (!response.ok) {
+         throw new Error(`RAG service error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as { chunks?: string[] };
+      const chunks = Array.isArray(data.chunks) ? data.chunks : [];
+
+      if (chunks.length === 0) {
+         return 'לא מצאתי מידע רלוונטי במאגר.';
+      }
+
+      const ragPayload = JSON.stringify(
+         {
+            product: productName,
+            user_query: query,
+            knowledge_chunks: chunks,
+         },
+         null,
+         2
+      );
+
+      const generation = await llmClient.generateText({
+         model: 'gpt-4o-mini',
+         instructions: ragGenerationPrompt,
+         prompt: ragPayload,
+         temperature: 0.2,
+         maxTokens: 220,
+      });
+
+      return generation.text.trim();
+   } catch (error) {
+      console.error(error);
+      return 'לא הצלחתי להביא מידע על המוצר כרגע, נסה שוב מאוחר יותר.';
+   } finally {
+      clearTimeout(timeout);
+   }
+}
+
 function extractJson(text: string): string | null {
    const match = text.match(/\{[\s\S]*\}/);
    return match ? match[0] : null;
@@ -431,12 +504,6 @@ async function routeMessage(
          message: await generalChat(history, userInput),
       };
    }
-
-   const orchestrationPrompt =
-      'You are a tool orchestration assistant. Combine the tool outputs into a single, concise response in Hebrew. Use only the provided tool results.';
-
-   const analyzeReviewPrompt =
-      'You analyze a short product review. Return: (1) sentiment label (positive/neutral/negative), (2) 2-3 key issues or praises. Keep it short and in Hebrew.';
 
    type ToolResult = {
       tool: ToolName;
@@ -582,6 +649,20 @@ async function routeMessage(
          continue;
       }
 
+      if (step.tool === 'getProductInformation') {
+         const productName =
+            typeof resolvedParameters.product_name === 'string'
+               ? resolvedParameters.product_name
+               : '';
+         const query =
+            typeof resolvedParameters.query === 'string'
+               ? resolvedParameters.query
+               : '';
+         const response = await getProductInformation(productName, query);
+         results.push({ tool: step.tool, text: response, data: response });
+         continue;
+      }
+
       results.push({
          tool: step.tool,
          text: 'הכלי שביקשת עדיין לא זמין.',
@@ -611,7 +692,7 @@ async function routeMessage(
 
       const synthesis = await llmClient.generateText({
          model: 'gpt-4o-mini',
-         instructions: orchestrationPrompt,
+         instructions: orchestrationSynthesisPrompt,
          prompt: synthesisPayload,
          temperature: 0.2,
          maxTokens: 200,

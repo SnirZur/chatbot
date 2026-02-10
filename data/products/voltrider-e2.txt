@@ -1,0 +1,9 @@
+VoltRider E2 is a fictional compact electric car with a 62 kWh battery pack and an estimated range of 420 km in mixed city/highway conditions. It supports DC fast charging up to 150 kW and AC home charging up to 11 kW. A 10-80% fast charge is advertised at 28 minutes under optimal conditions.
+
+Performance specs include 0-100 km/h in 6.9 seconds and a top speed limited to 160 km/h. The drivetrain is rear-wheel drive with 210 kW peak power and 350 Nm torque. Regenerative braking has three levels plus a one-pedal mode.
+
+Interior features include a 15-inch center display, OTA software updates, and a driver assistance suite called LaneGuard. LaneGuard offers adaptive cruise control, lane-keeping, and auto-emergency braking.
+
+Climate efficiency features include a heat pump, pre-conditioning via mobile app, and seat heaters in the front row. The cabin storage is 410 liters in the rear plus a 40-liter front trunk.
+
+Recommended tire pressure is 38 PSI. The manual suggests checking tire wear every 10,000 km and running a battery health check once per year.
