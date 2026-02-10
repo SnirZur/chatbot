@@ -244,15 +244,21 @@ function calculateMath(expression: string): number {
    return values[0];
 }
 
-function getExchangeRate(from: string, to = 'ILS'): string {
+function getExchangeRate(
+   from: string,
+   to = 'ILS'
+): {
+   text: string;
+   rate?: number;
+} {
    const normalizedFrom = from.trim().toUpperCase();
    const normalizedTo = to.trim().toUpperCase() || 'ILS';
    if (!normalizedFrom) {
-      return 'לא מכיר את קוד המטבע שביקשת.';
+      return { text: 'לא מכיר את קוד המטבע שביקשת.' };
    }
 
    if (normalizedTo !== 'ILS') {
-      return 'כרגע אני תומך רק בשער מול ש״ח.';
+      return { text: 'כרגע אני תומך רק בשער מול ש״ח.' };
    }
 
    const rates: Record<string, number> = {
@@ -271,11 +277,11 @@ function getExchangeRate(from: string, to = 'ILS'): string {
 
    const rate = rates[normalizedFrom];
    if (!rate) {
-      return 'לא מכיר את קוד המטבע שביקשת.';
+      return { text: 'לא מכיר את קוד המטבע שביקשת.' };
    }
 
    const label = labels[normalizedFrom] ?? normalizedFrom;
-   return `שער ${label} היציג הוא ${rate} ש״ח`;
+   return { text: `שער ${label} היציג הוא ${rate} ש״ח`, rate };
 }
 
 async function generalChat(
@@ -426,85 +432,200 @@ async function routeMessage(
       };
    }
 
-   const firstStep = planResult.plan[0];
-   if (firstStep.tool === 'getWeather') {
-      const city =
-         typeof firstStep.parameters.city === 'string'
-            ? firstStep.parameters.city
-            : '';
-      return {
-         id: crypto.randomUUID(),
-         message: await getWeather(city),
-      };
-   }
+   const orchestrationPrompt =
+      'You are a tool orchestration assistant. Combine the tool outputs into a single, concise response in Hebrew. Use only the provided tool results.';
 
-   if (firstStep.tool === 'calculateMath') {
-      const inputNeedsTranslation = !isExpressionClean(userInput);
-      const rawExpression =
-         typeof firstStep.parameters.expression === 'string'
-            ? firstStep.parameters.expression
-            : userInput;
-      let expression = rawExpression;
+   const analyzeReviewPrompt =
+      'You analyze a short product review. Return: (1) sentiment label (positive/neutral/negative), (2) 2-3 key issues or praises. Keep it short and in Hebrew.';
 
-      if (inputNeedsTranslation) {
-         const translated = await translateMathExpression(userInput);
-         if (!translated) {
-            return {
-               id: crypto.randomUUID(),
-               message: 'לא הצלחתי לחשב את הביטוי שביקשת.',
-            };
-         }
-         expression = translated;
+   type ToolResult = {
+      tool: ToolName;
+      text: string;
+      data?: string | number;
+   };
+
+   const resolvePlaceholders = (
+      value: unknown,
+      results: ToolResult[]
+   ): unknown => {
+      if (typeof value === 'string') {
+         return value.replace(/<result_from_tool_(\d+)>/g, (_match, index) => {
+            const result = results[Number(index) - 1];
+            if (!result) {
+               return '';
+            }
+            if (typeof result.data === 'number') {
+               return String(result.data);
+            }
+            if (typeof result.data === 'string') {
+               return result.data;
+            }
+            return result.text;
+         });
       }
 
-      const result = calculateMath(expression);
+      if (Array.isArray(value)) {
+         return value.map((item) => resolvePlaceholders(item, results));
+      }
+
+      if (value && typeof value === 'object') {
+         const entries = Object.entries(value as Record<string, unknown>);
+         const resolved: Record<string, unknown> = {};
+         for (const [key, nested] of entries) {
+            resolved[key] = resolvePlaceholders(nested, results);
+         }
+         return resolved;
+      }
+
+      return value;
+   };
+
+   const results: ToolResult[] = [];
+
+   for (const step of planResult.plan) {
+      const resolvedParameters = resolvePlaceholders(
+         step.parameters,
+         results
+      ) as Record<string, unknown>;
+
+      if (step.tool === 'getWeather') {
+         const city =
+            typeof resolvedParameters.city === 'string'
+               ? resolvedParameters.city
+               : '';
+         const weather = await getWeather(city);
+         results.push({ tool: step.tool, text: weather, data: weather });
+         continue;
+      }
+
+      if (step.tool === 'calculateMath') {
+         const rawExpression =
+            typeof resolvedParameters.expression === 'string'
+               ? resolvedParameters.expression
+               : '';
+         let expression = rawExpression;
+
+         if (!isExpressionClean(expression)) {
+            const translated = await translateMathExpression(rawExpression);
+            if (!translated) {
+               results.push({
+                  tool: step.tool,
+                  text: 'לא הצלחתי לחשב את הביטוי שביקשת.',
+               });
+               continue;
+            }
+            expression = translated;
+         }
+
+         const result = calculateMath(expression);
+         if (!Number.isFinite(result)) {
+            results.push({
+               tool: step.tool,
+               text: 'לא הצלחתי לחשב את הביטוי שביקשת.',
+            });
+            continue;
+         }
+
+         results.push({
+            tool: step.tool,
+            text: `התוצאה היא ${result}`,
+            data: result,
+         });
+         continue;
+      }
+
+      if (step.tool === 'getExchangeRate') {
+         const from =
+            typeof resolvedParameters.from === 'string'
+               ? resolvedParameters.from
+               : '';
+         const to =
+            typeof resolvedParameters.to === 'string'
+               ? resolvedParameters.to
+               : 'ILS';
+         const exchange = getExchangeRate(from, to);
+         results.push({
+            tool: step.tool,
+            text: exchange.text,
+            data: exchange.rate ?? exchange.text,
+         });
+         continue;
+      }
+
+      if (step.tool === 'generalChat') {
+         const message =
+            typeof resolvedParameters.message === 'string'
+               ? resolvedParameters.message
+               : userInput;
+         const response = await generalChat(history, message);
+         results.push({ tool: step.tool, text: response, data: response });
+         continue;
+      }
+
+      if (step.tool === 'analyzeReview') {
+         const reviewText =
+            typeof resolvedParameters.review_text === 'string'
+               ? resolvedParameters.review_text
+               : '';
+         const response = await llmClient.generateText({
+            model: 'gpt-4o-mini',
+            instructions: analyzeReviewPrompt,
+            prompt: reviewText,
+            temperature: 0.2,
+            maxTokens: 120,
+         });
+         results.push({
+            tool: step.tool,
+            text: response.text,
+            data: response.text,
+         });
+         continue;
+      }
+
+      results.push({
+         tool: step.tool,
+         text: 'הכלי שביקשת עדיין לא זמין.',
+      });
+   }
+
+   if (results.length === 0) {
       return {
          id: crypto.randomUUID(),
-         message: Number.isFinite(result)
-            ? `התוצאה היא ${result}`
-            : 'לא הצלחתי לחשב את הביטוי שביקשת.',
+         message: await generalChat(history, userInput),
       };
    }
 
-   if (firstStep.tool === 'getExchangeRate') {
-      const from =
-         typeof firstStep.parameters.from === 'string'
-            ? firstStep.parameters.from
-            : '';
-      const to =
-         typeof firstStep.parameters.to === 'string'
-            ? firstStep.parameters.to
-            : 'ILS';
-      return {
-         id: crypto.randomUUID(),
-         message: getExchangeRate(from, to),
-      };
-   }
+   if (planResult.final_answer_synthesis_required) {
+      const synthesisPayload = JSON.stringify(
+         {
+            user_request: userInput,
+            tool_results: results.map((result, index) => ({
+               step: index + 1,
+               tool: result.tool,
+               output: result.text,
+            })),
+         },
+         null,
+         2
+      );
 
-   if (firstStep.tool === 'generalChat') {
-      const message =
-         typeof firstStep.parameters.message === 'string'
-            ? firstStep.parameters.message
-            : userInput;
-      return {
-         id: crypto.randomUUID(),
-         message: await generalChat(history, message),
-      };
-   }
+      const synthesis = await llmClient.generateText({
+         model: 'gpt-4o-mini',
+         instructions: orchestrationPrompt,
+         prompt: synthesisPayload,
+         temperature: 0.2,
+         maxTokens: 200,
+      });
 
-   if (
-      firstStep.tool === 'getProductInformation' ||
-      firstStep.tool === 'analyzeReview'
-   ) {
       return {
          id: crypto.randomUUID(),
-         message: 'הכלי שביקשת עדיין לא זמין.',
+         message: synthesis.text,
       };
    }
 
    return {
       id: crypto.randomUUID(),
-      message: await generalChat(history, userInput),
+      message: results[results.length - 1]?.text ?? 'לא הצלחתי להשיב.',
    };
 }
 
