@@ -362,7 +362,7 @@ async function getProductInformation(
    productName: string,
    query: string,
    reqId: string
-): Promise<string> {
+): Promise<{ text: string; searchMs: number; generationMs: number }> {
    const baseUrl =
       process.env.RAG_SERVICE_URL?.trim() || 'http://localhost:8000';
    const composedQuery = [productName, query]
@@ -377,6 +377,8 @@ async function getProductInformation(
    const controller = new AbortController();
    const timeout = setTimeout(() => controller.abort(), 8000);
    const startTime = Date.now();
+   let searchMs = 0;
+   let generationMs = 0;
 
    try {
       logPhase(reqId, 'RAG');
@@ -396,6 +398,7 @@ async function getProductInformation(
          reqId,
          `[RAG] http_status=${response.status} duration=${Date.now() - startTime}ms`
       );
+      searchMs = Date.now() - startTime;
       if (!response.ok) {
          throw new Error(`RAG service error: ${response.status}`);
       }
@@ -429,6 +432,7 @@ async function getProductInformation(
       );
       logBlock(reqId, '[RAG.context]', preview(ragPayload, 800));
 
+      const ragGenStart = Date.now();
       const generation = await llmClient.generateText({
          model: 'gpt-4o-mini',
          instructions: ragGenerationPrompt,
@@ -436,14 +440,23 @@ async function getProductInformation(
          temperature: 0.2,
          maxTokens: 220,
       });
+      generationMs = Date.now() - ragGenStart;
 
-      return generation.text.trim();
+      return {
+         text: generation.text.trim(),
+         searchMs,
+         generationMs,
+      };
    } catch (error) {
       logError(
          reqId,
          `[RAG] ${error instanceof Error ? error.message : 'Unknown error'}`
       );
-      return 'לא הצלחתי להביא מידע על המוצר כרגע, נסה שוב מאוחר יותר.';
+      return {
+         text: 'לא הצלחתי להביא מידע על המוצר כרגע, נסה שוב מאוחר יותר.',
+         searchMs,
+         generationMs,
+      };
    } finally {
       clearTimeout(timeout);
    }
@@ -588,17 +601,67 @@ async function routeMessage(
    userInput: string,
    _conversationId: string
 ): Promise<ChatResponse> {
+   const requestStart = Date.now();
    const reqId = nextRequestId();
+   const timings: {
+      routingMs: number;
+      synthesisMs: number;
+      totalMs: number;
+      generalChatMs: number;
+      steps: Array<{ tool: ToolName; durationMs: number }>;
+      rag: Array<{ searchMs: number; generationMs: number }>;
+   } = {
+      routingMs: 0,
+      synthesisMs: 0,
+      totalMs: 0,
+      generalChatMs: 0,
+      steps: [],
+      rag: [],
+   };
+
+   const finalize = (message: string): ChatResponse => {
+      timings.totalMs = Date.now() - requestStart;
+      logPhase(reqId, 'SUMMARY');
+      logLine(
+         reqId,
+         `[SUMMARY] total=${timings.totalMs}ms routing=${timings.routingMs}ms synthesis=${timings.synthesisMs}ms general_chat=${timings.generalChatMs}ms`
+      );
+      if (timings.steps.length > 0) {
+         logLine(
+            reqId,
+            `[SUMMARY] steps=${timings.steps
+               .map(
+                  (step, index) =>
+                     `${index + 1}:${step.tool}=${step.durationMs}ms`
+               )
+               .join(', ')}`
+         );
+      }
+      if (timings.rag.length > 0) {
+         logLine(
+            reqId,
+            `[SUMMARY] rag=${timings.rag
+               .map(
+                  (rag, index) =>
+                     `${index + 1}:search=${rag.searchMs}ms gen=${rag.generationMs}ms`
+               )
+               .join(', ')}`
+         );
+      }
+      return {
+         id: crypto.randomUUID(),
+         message,
+      };
+   };
+
    logLine(reqId, `[REQ] user="${preview(userInput)}"`);
    if (userInput.trim() === '/reset') {
       await resetHistory();
-      return {
-         id: crypto.randomUUID(),
-         message: 'היסטוריית השיחה אופסה. נתחיל שיחה חדשה.',
-      };
+      return finalize('היסטוריית השיחה אופסה. נתחיל שיחה חדשה.');
    }
 
    const planResult = await classifyPlan(userInput, reqId);
+   timings.routingMs = planResult.durationMs;
    logPhase(reqId, 'PLAN');
    const prettyPlan = (() => {
       try {
@@ -620,10 +683,10 @@ async function routeMessage(
    });
 
    if (planResult.plan.plan.length === 0) {
-      return {
-         id: crypto.randomUUID(),
-         message: await generalChat(history, userInput),
-      };
+      const generalStart = Date.now();
+      const response = await generalChat(history, userInput);
+      timings.generalChatMs = Date.now() - generalStart;
+      return finalize(response);
    }
 
    type ToolResult = {
@@ -705,6 +768,10 @@ async function routeMessage(
                   : '';
             const weather = await getWeather(city, reqId);
             results.push({ tool: step.tool, text: weather, data: weather });
+            timings.steps.push({
+               tool: step.tool,
+               durationMs: Date.now() - stepStart,
+            });
             logLine(
                reqId,
                `Step ${stepNumber}/${totalSteps} result="${preview(
@@ -729,6 +796,10 @@ async function routeMessage(
                      tool: step.tool,
                      text: fallback,
                   });
+                  timings.steps.push({
+                     tool: step.tool,
+                     durationMs: Date.now() - stepStart,
+                  });
                   logError(
                      reqId,
                      `Step ${stepNumber} tool=${step.tool} failed: translation failed (fallback="${fallback}")`
@@ -751,6 +822,10 @@ async function routeMessage(
                   tool: step.tool,
                   text: fallback,
                });
+               timings.steps.push({
+                  tool: step.tool,
+                  durationMs: Date.now() - stepStart,
+               });
                logError(
                   reqId,
                   `Step ${stepNumber} tool=${step.tool} failed: invalid result (fallback="${fallback}")`
@@ -769,6 +844,10 @@ async function routeMessage(
                tool: step.tool,
                text: responseText,
                data: result,
+            });
+            timings.steps.push({
+               tool: step.tool,
+               durationMs: Date.now() - stepStart,
             });
             logLine(
                reqId,
@@ -794,6 +873,10 @@ async function routeMessage(
                text: exchange.text,
                data: exchange.rate ?? exchange.text,
             });
+            timings.steps.push({
+               tool: step.tool,
+               durationMs: Date.now() - stepStart,
+            });
             logLine(
                reqId,
                `Step ${stepNumber}/${totalSteps} result="${preview(
@@ -808,8 +891,14 @@ async function routeMessage(
                typeof resolvedParameters.message === 'string'
                   ? resolvedParameters.message
                   : userInput;
+            const generalStart = Date.now();
             const response = await generalChat(history, message);
+            timings.generalChatMs += Date.now() - generalStart;
             results.push({ tool: step.tool, text: response, data: response });
+            timings.steps.push({
+               tool: step.tool,
+               durationMs: Date.now() - stepStart,
+            });
             logLine(
                reqId,
                `Step ${stepNumber}/${totalSteps} result="${preview(
@@ -824,6 +913,7 @@ async function routeMessage(
                typeof resolvedParameters.review_text === 'string'
                   ? resolvedParameters.review_text
                   : '';
+            const reviewStart = Date.now();
             const response = await llmClient.generateText({
                model: 'gpt-4o-mini',
                instructions: analyzeReviewPrompt,
@@ -835,6 +925,10 @@ async function routeMessage(
                tool: step.tool,
                text: response.text,
                data: response.text,
+            });
+            timings.steps.push({
+               tool: step.tool,
+               durationMs: Date.now() - reviewStart,
             });
             logLine(
                reqId,
@@ -859,11 +953,23 @@ async function routeMessage(
                query,
                reqId
             );
-            results.push({ tool: step.tool, text: response, data: response });
+            results.push({
+               tool: step.tool,
+               text: response.text,
+               data: response.text,
+            });
+            timings.steps.push({
+               tool: step.tool,
+               durationMs: Date.now() - stepStart,
+            });
+            timings.rag.push({
+               searchMs: response.searchMs,
+               generationMs: response.generationMs,
+            });
             logLine(
                reqId,
                `Step ${stepNumber}/${totalSteps} result="${preview(
-                  response
+                  response.text
                )}" duration=${Date.now() - stepStart}ms`
             );
             continue;
@@ -873,6 +979,10 @@ async function routeMessage(
          results.push({
             tool: step.tool,
             text: fallback,
+         });
+         timings.steps.push({
+            tool: step.tool,
+            durationMs: Date.now() - stepStart,
          });
          logError(
             reqId,
@@ -887,6 +997,10 @@ async function routeMessage(
       } catch (error) {
          const fallback = 'אירעה שגיאה במהלך ביצוע הפעולה.';
          results.push({ tool: step.tool, text: fallback });
+         timings.steps.push({
+            tool: step.tool,
+            durationMs: Date.now() - stepStart,
+         });
          logError(
             reqId,
             `Step ${stepNumber} tool=${step.tool} error=${
@@ -903,10 +1017,10 @@ async function routeMessage(
    }
 
    if (results.length === 0) {
-      return {
-         id: crypto.randomUUID(),
-         message: await generalChat(history, userInput),
-      };
+      const generalStart = Date.now();
+      const response = await generalChat(history, userInput);
+      timings.generalChatMs = Date.now() - generalStart;
+      return finalize(response);
    }
 
    if (planResult.plan.final_answer_synthesis_required) {
@@ -928,10 +1042,7 @@ async function routeMessage(
             ? `${exchangeText}. לפי החישוב, יישארו ${numericValue} ש״ח.`
             : `לפי החישוב, יישארו ${numericValue} ש״ח.`;
          logLine(reqId, '[SYNTH] deterministic_answer_used=true');
-         return {
-            id: crypto.randomUUID(),
-            message: responseText,
-         };
+         return finalize(responseText);
       }
 
       const synthesisPayload = JSON.stringify(
@@ -962,18 +1073,13 @@ async function routeMessage(
          temperature: 0.2,
          maxTokens: 200,
       });
-      logLine(reqId, `[SYNTH] duration=${Date.now() - synthStart}ms`);
+      timings.synthesisMs = Date.now() - synthStart;
+      logLine(reqId, `[SYNTH] duration=${timings.synthesisMs}ms`);
 
-      return {
-         id: crypto.randomUUID(),
-         message: synthesis.text,
-      };
+      return finalize(synthesis.text);
    }
 
-   return {
-      id: crypto.randomUUID(),
-      message: results[results.length - 1]?.text ?? 'לא הצלחתי להשיב.',
-   };
+   return finalize(results[results.length - 1]?.text ?? 'לא הצלחתי להשיב.');
 }
 
 // Public interface
