@@ -42,6 +42,22 @@ export function logError(reqId: string, message: string) {
    console.error(`${PREFIX} [${reqId}] ERROR ${message}`);
 }
 
+export function logBlock(
+   reqId: string,
+   label: string,
+   text: string,
+   maxLen = 1200
+) {
+   if (!debugEnabled()) {
+      return;
+   }
+   const truncated = truncate(text, maxLen);
+   const lines = truncated.split('\n');
+   for (const line of lines) {
+      logLine(reqId, `${label} ${line}`);
+   }
+}
+
 export function preview(value: unknown, maxLen = 200): string {
    if (value === null || value === undefined) {
       return String(value);

@@ -3,6 +3,7 @@ import { llmClient } from '../llm/client';
 import {
    debugEnabled,
    logError,
+   logBlock,
    logLine,
    logPhase,
    preview,
@@ -395,7 +396,7 @@ async function getProductInformation(
          null,
          2
       );
-      logLine(reqId, `[RAG] context_preview="${preview(ragPayload)}"`);
+      logBlock(reqId, '[RAG.context]', preview(ragPayload, 800));
 
       const generation = await llmClient.generateText({
          model: 'gpt-4o-mini',
@@ -558,7 +559,14 @@ async function routeMessage(
 
    const planResult = await classifyPlan(userInput, reqId);
    logPhase(reqId, 'PLAN');
-   logLine(reqId, `[PLAN] raw="${preview(planResult.rawText)}"`);
+   const prettyPlan = (() => {
+      try {
+         return JSON.stringify(JSON.parse(planResult.rawText), null, 2);
+      } catch {
+         return planResult.rawText || '';
+      }
+   })();
+   logBlock(reqId, '[PLAN.raw]', prettyPlan || '(empty)');
    logLine(
       reqId,
       `[PLAN] steps=${planResult.plan.plan.length} synth=${planResult.plan.final_answer_synthesis_required} duration=${planResult.durationMs}ms`
