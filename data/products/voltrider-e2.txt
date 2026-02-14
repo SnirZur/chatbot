@@ -7,3 +7,13 @@ Interior features include a 15-inch center display, OTA software updates, and a 
 Climate efficiency features include a heat pump, pre-conditioning via mobile app, and seat heaters in the front row. The cabin storage is 410 liters in the rear plus a 40-liter front trunk.
 
 Recommended tire pressure is 38 PSI. The manual suggests checking tire wear every 10,000 km and running a battery health check once per year.
+
+Charging guidance: use DC fast charging when the battery is between 20-60% for optimal speed. For daily use, AC home charging to 80% is recommended to preserve long-term battery health. The charge port is on the front-left fender with an LED ring that shows charge status.
+
+Infotainment includes wireless Apple CarPlay and Android Auto, plus a built-in navigation system with live traffic. The audio system has 8 speakers and a cabin noise reduction mode that reduces road noise at highway speeds.
+
+Safety features include 8 airbags, a tire pressure monitoring system, and automatic high-beam headlights. LaneGuard can be customized for steering sensitivity and following distance.
+
+Winter performance notes: pre-conditioning the cabin while plugged in can improve range. The heat pump reduces energy use by up to 20% in mild cold weather but is less effective below -10°C.
+
+Service intervals are every 20,000 km or 12 months. Brake pads typically last longer due to regenerative braking, but rotor inspection is still recommended at each service visit.
