@@ -16,6 +16,7 @@ Rules:
 - If the answer needs combining tool results or multi-step reasoning, set final_answer_synthesis_required to true.
 - If no tool is needed, output plan: [] and final_answer_synthesis_required: false.
 - Keep parameters minimal and specific.
+- For calculateMath expressions, use ONLY + - * / and parentheses (no Unicode math symbols like × or ÷).
 
 Examples (single tool):
 User: "מה מזג האוויר בחיפה?"

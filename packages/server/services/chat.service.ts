@@ -234,19 +234,47 @@ function calculateMath(expression: string): number {
          continue;
       }
 
+      if (char === '(') {
+         operators.push(char);
+         index += 1;
+         continue;
+      }
+
+      if (char === ')') {
+         while (
+            operators.length > 0 &&
+            operators[operators.length - 1] !== '('
+         ) {
+            applyOperator();
+         }
+         if (operators[operators.length - 1] === '(') {
+            operators.pop();
+         } else {
+            return Number.NaN;
+         }
+         index += 1;
+         continue;
+      }
+
       // @ts-ignore
       if (!/[+\-*\/]/.test(char)) {
          return Number.NaN;
       }
 
-      while (
-         operators.length > 0 &&
-         char &&
-         /[+\-*\/]/.test(char) &&
-         (precedence[operators[operators.length - 1]!] ?? 0) >=
-            (precedence[char] ?? 0)
-      ) {
-         applyOperator();
+      while (operators.length > 0) {
+         const top = operators[operators.length - 1];
+         if (top === '(') {
+            break;
+         }
+         if (
+            char &&
+            /[+\-*\/]/.test(char) &&
+            (precedence[top as string] ?? 0) >= (precedence[char] ?? 0)
+         ) {
+            applyOperator();
+            continue;
+         }
+         break;
       }
 
       if (char) {
@@ -256,6 +284,9 @@ function calculateMath(expression: string): number {
    }
 
    while (operators.length > 0) {
+      if (operators[operators.length - 1] === '(') {
+         return Number.NaN;
+      }
       applyOperator();
    }
 
@@ -477,6 +508,14 @@ function isExpressionClean(expression: string): boolean {
    return /^[\d+\-*/().\s]+$/.test(expression);
 }
 
+function normalizeExpression(expression: string): string {
+   return expression
+      .replace(/×/g, '*')
+      .replace(/÷/g, '/')
+      .replace(/–/g, '-')
+      .replace(/−/g, '-');
+}
+
 async function translateMathExpression(
    problem: string
 ): Promise<string | null> {
@@ -488,7 +527,9 @@ async function translateMathExpression(
       maxTokens: 60,
    });
 
-   const expression = response.text.trim().split('\n')[0]?.trim();
+   const expression = normalizeExpression(
+      response.text.trim().split('\n')[0]?.trim() ?? ''
+   );
    if (!expression || !isExpressionClean(expression)) {
       return null;
    }
@@ -678,7 +719,7 @@ async function routeMessage(
                typeof resolvedParameters.expression === 'string'
                   ? resolvedParameters.expression
                   : '';
-            let expression = rawExpression;
+            let expression = normalizeExpression(rawExpression);
 
             if (!isExpressionClean(expression)) {
                const translated = await translateMathExpression(rawExpression);
@@ -870,6 +911,29 @@ async function routeMessage(
 
    if (planResult.plan.final_answer_synthesis_required) {
       logPhase(reqId, 'SYNTHESIS');
+      const numericResults = results.filter(
+         (result) => typeof result.data === 'number'
+      );
+      const isMathAndFxOnly = results.every(
+         (result) =>
+            result.tool === 'calculateMath' || result.tool === 'getExchangeRate'
+      );
+
+      if (numericResults.length === 1 && isMathAndFxOnly) {
+         const exchangeText =
+            results.find((result) => result.tool === 'getExchangeRate')?.text ??
+            '';
+         const numericValue = numericResults[0]?.data as number;
+         const responseText = exchangeText
+            ? `${exchangeText}. לפי החישוב, יישארו ${numericValue} ש״ח.`
+            : `לפי החישוב, יישארו ${numericValue} ש״ח.`;
+         logLine(reqId, '[SYNTH] deterministic_answer_used=true');
+         return {
+            id: crypto.randomUUID(),
+            message: responseText,
+         };
+      }
+
       const synthesisPayload = JSON.stringify(
          {
             user_request: userInput,
