@@ -911,19 +911,19 @@ async function routeMessage(
 
    if (planResult.plan.final_answer_synthesis_required) {
       logPhase(reqId, 'SYNTHESIS');
-      const numericResults = results.filter(
-         (result) => typeof result.data === 'number'
-      );
       const isMathAndFxOnly = results.every(
          (result) =>
             result.tool === 'calculateMath' || result.tool === 'getExchangeRate'
       );
+      const mathResult = results.find(
+         (result) => result.tool === 'calculateMath'
+      );
 
-      if (numericResults.length === 1 && isMathAndFxOnly) {
+      if (isMathAndFxOnly && typeof mathResult?.data === 'number') {
          const exchangeText =
             results.find((result) => result.tool === 'getExchangeRate')?.text ??
             '';
-         const numericValue = numericResults[0]?.data as number;
+         const numericValue = mathResult.data as number;
          const responseText = exchangeText
             ? `${exchangeText}. לפי החישוב, יישארו ${numericValue} ש״ח.`
             : `לפי החישוב, יישארו ${numericValue} ש״ח.`;
