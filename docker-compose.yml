@@ -35,7 +35,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun src/node/services/router.ts
+    command: ["src/node/services/router.ts"]
     depends_on:
       - kafka
       - ollama
@@ -48,7 +48,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun src/node/services/orchestrator.ts
+    command: ["src/node/services/orchestrator.ts"]
     depends_on:
       - kafka
     environment:
@@ -59,7 +59,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun src/node/services/tool-worker.ts
+    command: ["src/node/services/tool-worker.ts"]
     depends_on:
       - kafka
     environment:
@@ -71,7 +71,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun src/node/services/llm-inference-worker.ts
+    command: ["src/node/services/llm-inference-worker.ts"]
     depends_on:
       - kafka
       - ollama
@@ -84,7 +84,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun src/node/services/synthesis-worker.ts
+    command: ["src/node/services/synthesis-worker.ts"]
     depends_on:
       - kafka
     environment:
@@ -96,7 +96,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun src/node/services/aggregator.ts
+    command: ["src/node/services/aggregator.ts"]
     depends_on:
       - kafka
     environment:
@@ -107,7 +107,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun src/node/services/history-projection.ts
+    command: ["src/node/services/history-projection.ts"]
     depends_on:
       - kafka
     environment:
@@ -118,7 +118,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun src/node/services/metrics.ts
+    command: ["src/node/services/metrics.ts"]
     depends_on:
       - kafka
     environment:
@@ -141,7 +141,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun --cwd packages/server run dev
+    command: ["--cwd", "packages/server", "run", "dev"]
     depends_on:
       - kafka
     environment:
@@ -152,7 +152,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    command: bun --cwd packages/client run dev --host
+    command: ["--cwd", "packages/client", "run", "dev", "--", "--host"]
     depends_on:
       - server
     ports:
