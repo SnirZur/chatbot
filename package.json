@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "bun run index.ts",
-    "services": "concurrently \"bun memoryService.ts\" \"bun routerService.ts\" \"bun mathApp.ts\" \"bun weatherApp.ts\" \"bun exchangeApp.ts\" \"bun generalChatApp.ts\" \"bun responseAggregator.ts\"",
-    "services:cli": "concurrently \"bun userInterface.ts\" \"bun memoryService.ts\" \"bun routerService.ts\" \"bun mathApp.ts\" \"bun weatherApp.ts\" \"bun exchangeApp.ts\" \"bun generalChatApp.ts\" \"bun responseAggregator.ts\"",
+    "services": "concurrently \"bun src/node/services/router.ts\" \"bun src/node/services/orchestrator.ts\" \"bun src/node/services/tool-worker.ts\" \"bun src/node/services/llm-inference-worker.ts\" \"bun src/node/services/aggregator.ts\" \"bun src/node/services/synthesis-worker.ts\" \"bun src/node/services/history-projection.ts\"",
+    "services:cli": "concurrently \"bun src/node/services/router.ts\" \"bun src/node/services/orchestrator.ts\" \"bun src/node/services/tool-worker.ts\" \"bun src/node/services/llm-inference-worker.ts\" \"bun src/node/services/aggregator.ts\" \"bun src/node/services/synthesis-worker.ts\" \"bun src/node/services/history-projection.ts\"",
     "full": "concurrently \"bun run services\" \"bun --cwd packages/server run dev\" \"bun --cwd packages/client run dev\"",
     "format": "prettier --write .",
     "prepare": "husky"
@@ -23,7 +23,10 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "ajv": "^8.17.1",
     "kafkajs": "^2.2.4",
+    "level": "^8.0.1",
+    "ollama": "^0.5.17",
     "openai": "^5.8.2"
   },
   "workspaces": [
