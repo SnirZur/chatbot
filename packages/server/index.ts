@@ -1,11 +1,8 @@
 import dotenv from 'dotenv';
 import express from 'express';
-import path from 'node:path';
 import router from './routes';
 
-dotenv.config({
-   path: path.resolve(import.meta.dir, '..', '..', '.env'),
-});
+dotenv.config();
 
 const app = express();
 app.use(express.json());
