@@ -114,12 +114,6 @@ const init = async () => {
 };
 
 export const isKafkaReady = async () => {
-   if (!kafka) {
-      kafka = new Kafka({
-         clientId: 'web-gateway',
-         brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
-      });
-   }
    const admin = kafka!.admin();
    try {
       await admin.connect();
