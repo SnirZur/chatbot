@@ -348,11 +348,9 @@ async function generalChat(
       { role: 'user', content: userInput },
    ];
 
-   const response = await llmClient.chatCompletion({
-      model: 'gpt-4o-mini',
+   const response = await llmClient.chatCompletionOllama({
+      model: 'tinyllama',
       messages,
-      temperature: 0.2,
-      maxTokens: 200,
    });
 
    return response.text;
@@ -573,16 +571,29 @@ async function classifyPlan(
       });
 
       const durationMs = Date.now() - startTime;
-      const parsed = parseRouterPlan(response.text);
+      let parsed = parseRouterPlan(response.text);
+      let rawText = response.text;
+      if (!parsed) {
+         logLine(reqId, '[PLAN] openai parse failed, falling back to ollama');
+         const ollamaResponse = await llmClient.chatCompletionOllama({
+            model: 'tinyllama',
+            messages: [
+               { role: 'system', content: routerPrompt },
+               { role: 'user', content: message },
+            ],
+         });
+         rawText = ollamaResponse.text;
+         parsed = parseRouterPlan(rawText);
+      }
       if (!parsed) {
          return {
             plan: { plan: [], final_answer_synthesis_required: false },
-            rawText: response.text,
+            rawText,
             durationMs,
          };
       }
 
-      return { plan: parsed, rawText: response.text, durationMs };
+      return { plan: parsed, rawText, durationMs };
    } catch (error) {
       logError(
          reqId,

@@ -82,6 +82,24 @@ export const llmClient = {
       };
    },
 
+   async chatCompletionOllama({
+      model = 'tinyllama',
+      messages,
+   }: {
+      model?: string;
+      messages: ChatMessage[];
+   }): Promise<GenerateTextResult> {
+      const response = await ollamaClient.chat({
+         model,
+         messages,
+      });
+
+      return {
+         id: response.message?.role ?? 'ollama',
+         text: response.message?.content ?? '',
+      };
+   },
+
    async summarizeReviews(reviews: string) {
       const response = await ollamaClient.chat({
          model: 'tinyllama',
