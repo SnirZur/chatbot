@@ -1,139 +1,59 @@
-# Kafka Microservices Chatbot
+# Advanced Final Project — Event-Sourced Tool-Orchestrating Agent
 
-This project refactors the class chatbot into a Kafka-based microservices architecture using Bun.
+## Architecture Diagram
 
-## Services and Topics
+![architecture](architecture.png)
 
-| Service | Consumes | Produces |
-| --- | --- | --- |
-| `userInterface.ts` | `bot-responses` | `user-input-events`, `user-control-events` |
-| `memoryService.ts` | `user-input-events`, `app-results`, `user-control-events` | `conversation-history-update` |
-| `routerService.ts` | `user-input-events`, `conversation-history-update` | `intent-math`, `intent-weather`, `intent-exchange`, `intent-general-chat` |
-| `mathApp.ts` | `intent-math` | `app-results` |
-| `weatherApp.ts` | `intent-weather` | `app-results` |
-| `exchangeApp.ts` | `intent-exchange` | `app-results` |
-| `generalChatApp.ts` | `intent-general-chat` | `app-results` |
-| `responseAggregator.ts` | `app-results` | `bot-responses` |
+## Overview
+This project implements an event-sourced, CQRS-style tool-orchestrating agent over Kafka. Commands are produced into `user-commands` and `tool-invocation-requests`. Events are appended into `conversation-events`, which acts as the source of truth. Read models (history) are projections built from the event log.
 
-Kafka topics (exact names):
-- `user-input-events`
-- `app-results`
-- `bot-responses`
-- `user-control-events`
-- `intent-math`
-- `intent-weather`
-- `intent-exchange`
-- `intent-general-chat`
-- `conversation-history-update`
-- `conversation-history-request`
+## Event Sourcing + Stateful Stream Processing
+- **Event Store**: `conversation-events` topic is the canonical log for reconstructing agent state.
+- **CQRS**: commands and events are separated; read models are projections.
+- **Orchestrator**: stateful processor with LevelDB backing store; recovers after restart and continues plans.
+- **Idempotent workers**: tool workers de-duplicate invocation IDs to avoid double side effects.
 
-## Architecture (PlantUML)
-![Architecture Diagram](architecture.png)
+## Services
+- **user-interface / web gateway**: uses existing UI identifier flow. Produces `UserQueryReceived` commands and waits for `FinalAnswerSynthesized` events.
+- **router**: generates orchestration plan (Ollama Llama3 primary, OpenAI fallback).
+- **orchestrator**: maintains plan state, emits tool invocation requests.
+- **tool workers**: execute tools via Kafka (weather, math, exchange, RAG retrieval, etc.).
+- **aggregator + synthesis**: collects results, requests synthesis, publishes final answer event.
+- **history-projection**: builds `history.json` from events.
 
+## Kafka Topics
+- `user-commands`
+- `conversation-events`
+- `tool-invocation-requests`
+- `synthesis-requests`
+- `dead-letter-queue`
 
-```plantuml
-@startuml
-actor User
-
-User -> "userInterface.ts"
-"userInterface.ts" --> "user-input-events"
-"userInterface.ts" --> "user-control-events"
-
-"user-input-events" --> "routerService.ts"
-"conversation-history-update" --> "routerService.ts"
-
-"routerService.ts" --> "intent-math"
-"routerService.ts" --> "intent-weather"
-"routerService.ts" --> "intent-exchange"
-"routerService.ts" --> "intent-general-chat"
-
-"intent-math" --> "mathApp.ts"
-"intent-weather" --> "weatherApp.ts"
-"intent-exchange" --> "exchangeApp.ts"
-"intent-general-chat" --> "generalChatApp.ts"
-
-"mathApp.ts" --> "app-results"
-"weatherApp.ts" --> "app-results"
-"exchangeApp.ts" --> "app-results"
-"generalChatApp.ts" --> "app-results"
-
-"app-results" --> "memoryService.ts"
-"user-input-events" --> "memoryService.ts"
-"user-control-events" --> "memoryService.ts"
-"memoryService.ts" --> "conversation-history-update"
-
-"app-results" --> "responseAggregator.ts"
-"responseAggregator.ts" --> "bot-responses"
-"bot-responses" --> "userInterface.ts"
-@enduml
+## Run Instructions
+1. Set env vars:
 ```
-
-## Challenges I Ran Into (Student Notes)
-
-When I refactored the monolithic chatbot into Kafka microservices, a few things tripped me up:
-
-- **Service startup order:** Some services tried to subscribe before Kafka was ready, so I had to add retry/wait logic.
-- **Topic creation:** Auto-creation wasn’t always reliable, and missing topics caused consumer crashes until I enabled auto-create and added topic checks.
-- **Debugging flows:** With multiple services, it was harder to trace a single request end‑to‑end compared to a single file.
-- **History handling:** In the monolith, memory was just local state. With services, I had to pass history through Kafka and make sure the router actually had it.
-- **Environment variables:** Each service runs on its own, so I had to make sure `.env` values were loaded for each process.
-
-Overall, the refactor made the system more flexible, but it definitely added complexity to setup and debugging.
-
-## Running Locally
-
-1) Start Kafka + MySQL:
-
+OPENAI_API_KEY=...
+WEATHER_API_KEY=...
+```
+2. Start stack:
 ```
 docker compose up -d
 ```
-
-2) Install dependencies:
-
+3. Start services locally (optional for dev):
 ```
-bun install
-```
-
-3) Create `packages/server/.env`:
-
-```
-OPENAI_API_KEY=sk-...
-WEATHER_API_KEY=your_openweather_key
-DATABASE_URL="mysql://jennifer:jennifer@localhost:3306/ai_course"
+bun run services
+bun --cwd packages/server run dev
+bun --cwd packages/client run dev
 ```
 
-4) Run the microservices + web UI (two options):
+## Benchmarks
+See `BENCHMARK.md`.
 
-Option A — one command (runs microservices + web server + client):
+## Resilience Demos
+- **Worker crash**: stop RAG worker mid-plan, restart and resume.
+- **Orchestrator crash**: stop orchestrator mid-plan, restart and resume from LevelDB + events.
+- **Duplicate events**: resend same ToolInvocationRequested; worker ignores duplicate.
 
-```
-bun run full
-```
-
-Option B — run each process separately:
-
-Microservices (separate terminals):
-
-```
-bun memoryService.ts
-bun routerService.ts
-bun responseAggregator.ts
-bun mathApp.ts
-bun weatherApp.ts
-bun exchangeApp.ts
-bun generalChatApp.ts
-```
-
-Web server:
-
-```
-cd ./packages/server
-bun run dev
-```
-
-Web client:
-
-```
-cd ./packages/client
-bun run dev
-```
+## Trade-offs and Future Improvements
+- **Benefits**: auditability, recovery, and clear separation of concerns.
+- **Costs**: higher complexity, eventual consistency, harder debugging.
+- **Future**: Kafka Streams DSL, schema registry, KSQL, Prometheus/Grafana observability.
