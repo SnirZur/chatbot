@@ -83,7 +83,7 @@ export const llmClient = {
    },
 
    async chatCompletionOllama({
-      model = 'tinyllama',
+      model = 'llama3',
       messages,
    }: {
       model?: string;
@@ -102,7 +102,7 @@ export const llmClient = {
 
    async summarizeReviews(reviews: string) {
       const response = await ollamaClient.chat({
-         model: 'tinyllama',
+         model: 'llama3',
          messages: [
             {
                role: 'system',

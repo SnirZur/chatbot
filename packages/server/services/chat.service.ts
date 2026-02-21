@@ -349,7 +349,7 @@ async function generalChat(
    ];
 
    const response = await llmClient.chatCompletionOllama({
-      model: 'tinyllama',
+      model: 'llama3',
       messages,
    });
 
@@ -576,7 +576,7 @@ async function classifyPlan(
       if (!parsed) {
          logLine(reqId, '[PLAN] openai parse failed, falling back to ollama');
          const ollamaResponse = await llmClient.chatCompletionOllama({
-            model: 'tinyllama',
+            model: 'llama3',
             messages: [
                { role: 'system', content: routerPrompt },
                { role: 'user', content: message },
