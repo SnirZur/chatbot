@@ -99,42 +99,88 @@ export const llmClient = {
       model?: string;
       messages: ChatMessage[];
    }): Promise<GenerateTextResult> {
-      const start = Date.now();
-      const response = await ollamaClient.chat({
-         model,
-         messages,
-      });
-      const duration = Date.now() - start;
-      console.log(
-         `[LLM] provider=ollama action=chat model=${model} duration=${duration}ms`
-      );
+      try {
+         const start = Date.now();
+         const response = await ollamaClient.chat({
+            model,
+            messages,
+         });
+         const duration = Date.now() - start;
+         console.log(
+            `[LLM] provider=ollama action=chat model=${model} duration=${duration}ms`
+         );
 
-      return {
-         id: response.message?.role ?? 'ollama',
-         text: response.message?.content ?? '',
-      };
+         return {
+            id: response.message?.role ?? 'ollama',
+            text: response.message?.content ?? '',
+         };
+      } catch (err) {
+         console.error(
+            '[LLM] ollama chat failed, falling back to OpenAI:',
+            err instanceof Error ? err.message : err
+         );
+         const start = Date.now();
+         const response = await openAIClient.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: messages as any,
+            temperature: 0.2,
+            max_tokens: 300,
+         });
+         const duration = Date.now() - start;
+         console.log(
+            `[LLM] provider=openai action=chat.completions.create model=gpt-4o-mini duration=${duration}ms (fallback from ollama)`
+         );
+
+         return {
+            id: response.id,
+            text: response.choices[0]?.message?.content ?? '',
+         };
+      }
    },
 
    async summarizeReviews(reviews: string) {
-      const start = Date.now();
-      const response = await ollamaClient.chat({
-         model: 'llama3',
-         messages: [
-            {
-               role: 'system',
-               content: summarizePrompt,
-            },
-            {
-               role: 'user',
-               content: reviews,
-            },
-         ],
-      });
-      const duration = Date.now() - start;
-      console.log(
-         `[LLM] provider=ollama action=summarize model=llama3 duration=${duration}ms`
-      );
+      try {
+         const start = Date.now();
+         const response = await ollamaClient.chat({
+            model: 'llama3',
+            messages: [
+               {
+                  role: 'system',
+                  content: summarizePrompt,
+               },
+               {
+                  role: 'user',
+                  content: reviews,
+               },
+            ],
+         });
+         const duration = Date.now() - start;
+         console.log(
+            `[LLM] provider=ollama action=summarize model=llama3 duration=${duration}ms`
+         );
 
-      return response.message.content;
+         return response.message.content;
+      } catch (err) {
+         console.error(
+            '[LLM] ollama summarize failed, falling back to OpenAI:',
+            err instanceof Error ? err.message : err
+         );
+         const start = Date.now();
+         const response = await openAIClient.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+               { role: 'system', content: summarizePrompt },
+               { role: 'user', content: reviews },
+            ],
+            temperature: 0.2,
+            max_tokens: 300,
+         });
+         const duration = Date.now() - start;
+         console.log(
+            `[LLM] provider=openai action=chat.completions.create model=gpt-4o-mini duration=${duration}ms (fallback from ollama)`
+         );
+
+         return response.choices[0]?.message?.content ?? '';
+      }
    },
 };

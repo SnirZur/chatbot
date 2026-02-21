@@ -98,7 +98,9 @@ type ToolName =
    | 'getExchangeRate'
    | 'generalChat'
    | 'getProductInformation'
-   | 'analyzeReview';
+   | 'analyzeReview'
+   | 'reviewSentiment'
+   | 'reviewAnalysis';
 
 type PlanStep = {
    tool: ToolName;
@@ -109,6 +111,9 @@ type RouterPlan = {
    plan: PlanStep[];
    final_answer_synthesis_required: boolean;
 };
+
+const reviewSentimentPrompt = `Analyze the sentiment of the following review. Respond with a JSON object: { "score": number (0-1), "sentiment": "positive" | "neutral" | "negative" }`;
+const reviewAnalysisPrompt = `Analyze the following review and provide a score (0-1) and a short summary. Respond with a JSON object: { "score": number (0-1), "summary": string }`;
 
 async function getWeather(city: string, reqId: string): Promise<string> {
    const apiKey = process.env.WEATHER_API_KEY;
@@ -175,6 +180,9 @@ function calculateMath(expression: string): number {
       '/': 2,
    };
 
+   const getPrec = (op?: string): number =>
+      op && op in precedence ? precedence[op]! : 0;
+
    const applyOperator = () => {
       const operator = operators.pop();
       const right = values.pop();
@@ -207,23 +215,16 @@ function calculateMath(expression: string): number {
 
    let index = 0;
    while (index < trimmed.length) {
-      const char = trimmed[index];
-      // @ts-ignore
-      // @ts-ignore
-      // @ts-ignore
-      // @ts-ignore
+      const char = trimmed.charAt(index);
+      const prevChar = trimmed.charAt(index - 1);
       const isUnarySign =
          (char === '+' || char === '-') &&
-         (index === 0 ||
-            (trimmed[index - 1] !== undefined &&
-               /[+\-*/]/.test(trimmed[index - 1]!)));
+         (index === 0 || /[+\-*/]/.test(prevChar));
 
-      // @ts-ignore
       if (/\d|\./.test(char) || isUnarySign) {
          let start = index;
          index += 1;
-         // @ts-ignore
-         while (index < trimmed.length && /[\d.]/.test(trimmed[index])) {
+         while (index < trimmed.length && /[\d.]/.test(trimmed.charAt(index))) {
             index += 1;
          }
          const value = Number(trimmed.slice(start, index));
@@ -234,68 +235,31 @@ function calculateMath(expression: string): number {
          continue;
       }
 
-      if (char === '(') {
-         operators.push(char);
-         index += 1;
-         continue;
-      }
-
-      if (char === ')') {
-         while (
-            operators.length > 0 &&
-            operators[operators.length - 1] !== '('
-         ) {
-            applyOperator();
-         }
-         if (operators[operators.length - 1] === '(') {
-            operators.pop();
-         } else {
-            return Number.NaN;
-         }
-         index += 1;
-         continue;
-      }
-
-      // @ts-ignore
-      if (!/[+\-*\/]/.test(char)) {
+      if (!/[+\-*/]/.test(char)) {
          return Number.NaN;
       }
 
-      while (operators.length > 0) {
-         const top = operators[operators.length - 1];
-         if (top === '(') {
-            break;
-         }
-         if (
-            char &&
-            /[+\-*\/]/.test(char) &&
-            (precedence[top as string] ?? 0) >= (precedence[char] ?? 0)
-         ) {
-            applyOperator();
-            continue;
-         }
-         break;
+      while (
+         operators.length > 0 &&
+         getPrec(operators[operators.length - 1]) >= getPrec(char)
+      ) {
+         applyOperator();
       }
 
-      if (char) {
-         operators.push(char);
-      }
+      operators.push(char);
       index += 1;
    }
 
    while (operators.length > 0) {
-      if (operators[operators.length - 1] === '(') {
-         return Number.NaN;
-      }
       applyOperator();
    }
 
-   if (values.length !== 1 || !Number.isFinite(values[0])) {
+   const final = values[0];
+   if (values.length !== 1 || !Number.isFinite(final as number)) {
       return Number.NaN;
    }
 
-   // @ts-ignore
-   return values[0];
+   return final as number;
 }
 
 function getExchangeRate(
@@ -363,6 +327,7 @@ async function getProductInformation(
 ): Promise<{ text: string; searchMs: number; generationMs: number }> {
    const baseUrl =
       process.env.RAG_SERVICE_URL?.trim() || 'http://localhost:8000';
+   logLine(reqId, `[RAG Retrieval] baseUrl=${baseUrl}`);
    const composedQuery = [productName, query]
       .map((value) => value.trim())
       .filter(Boolean)
@@ -386,21 +351,19 @@ async function getProductInformation(
       logPhase(reqId, 'RAG');
       logLine(
          reqId,
-         `[RAG] query="${preview(composedQuery)}" product="${preview(productName)}"`
+         `[RAG Retrieval] query="${preview(composedQuery)}" product="${preview(productName)}"`
       );
-      logLine(reqId, '[RAG] calling python-service /search_kb');
+      const searchStart = Date.now();
       const response = await fetch(`${baseUrl}/search_kb`, {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
          body: JSON.stringify({ query: composedQuery }),
          signal: controller.signal,
       });
+      searchMs = Date.now() - searchStart;
+      logLine(reqId, `[RAG Retrieval] duration_ms=${searchMs}`);
+      logLine(reqId, `[RAG Retrieval] http_status=${response.status}`);
 
-      logLine(
-         reqId,
-         `[RAG] http_status=${response.status} duration=${Date.now() - startTime}ms`
-      );
-      searchMs = Date.now() - startTime;
       if (!response.ok) {
          throw new Error(`RAG service error: ${response.status}`);
       }
@@ -408,22 +371,13 @@ async function getProductInformation(
       const data = (await response.json()) as { chunks?: string[] };
       const chunks = Array.isArray(data.chunks) ? data.chunks : [];
 
-      logLine(reqId, `[RAG] chunks_received=${chunks.length}`);
-      if (debugEnabled()) {
-         chunks.slice(0, 3).forEach((chunk, index) => {
-            logLine(reqId, `[RAG.chunk${index + 1}] "${preview(chunk)}"`);
-         });
-      }
-      logLine(
-         reqId,
-         '[RAG] Embeddings computed in python-service (not logged here)'
-      );
+      logLine(reqId, `[RAG Retrieval] chunks_received=${chunks.length}`);
 
       if (chunks.length === 0) {
          return {
             text: 'לא מצאתי מידע רלוונטי במאגר.',
             searchMs,
-            generationMs,
+            generationMs: 0,
          };
       }
 
@@ -436,7 +390,6 @@ async function getProductInformation(
          null,
          2
       );
-      logBlock(reqId, '[RAG.context]', preview(ragPayload, 800));
 
       const ragGenStart = Date.now();
       const generation = await llmClient.generateText({
@@ -447,6 +400,7 @@ async function getProductInformation(
          maxTokens: 220,
       });
       generationMs = Date.now() - ragGenStart;
+      logLine(reqId, `[RAG Generation] duration_ms=${generationMs}`);
 
       return {
          text: generation.text.trim(),
@@ -468,13 +422,88 @@ async function getProductInformation(
    }
 }
 
+async function reviewSentiment(
+   reviewText: string,
+   reqId: string
+): Promise<{ score: number; sentiment: string; durationMs: number }> {
+   const start = Date.now();
+   const response = await llmClient.generateText({
+      model: 'gpt-4o-mini',
+      instructions: reviewSentimentPrompt,
+      prompt: reviewText,
+      temperature: 0.2,
+      maxTokens: 60,
+   });
+   const durationMs = Date.now() - start;
+   let score = 0;
+   let sentiment = 'neutral';
+   try {
+      const parsed = JSON.parse(response.text);
+      score = typeof parsed.score === 'number' ? parsed.score : 0;
+      sentiment =
+         typeof parsed.sentiment === 'string' ? parsed.sentiment : 'neutral';
+   } catch {}
+   logLine(
+      reqId,
+      `[ReviewSentiment] duration_ms=${durationMs} score=${score} sentiment=${sentiment}`
+   );
+   return { score, sentiment, durationMs };
+}
+
+async function reviewAnalysis(
+   reviewText: string,
+   reqId: string
+): Promise<{ score: number; summary: string; durationMs: number }> {
+   const start = Date.now();
+   const response = await llmClient.generateText({
+      model: 'gpt-4o-mini',
+      instructions: reviewAnalysisPrompt,
+      prompt: reviewText,
+      temperature: 0.2,
+      maxTokens: 80,
+   });
+   const durationMs = Date.now() - start;
+   let score = 0;
+   let summary = '';
+   try {
+      const parsed = JSON.parse(response.text);
+      score = typeof parsed.score === 'number' ? parsed.score : 0;
+      summary = typeof parsed.summary === 'string' ? parsed.summary : '';
+   } catch {}
+   logLine(
+      reqId,
+      `[ReviewAnalysis] duration_ms=${durationMs} score=${score} summary="${summary}"`
+   );
+   return { score, summary, durationMs };
+}
+
 function extractJson(text: string): string | null {
-   const match = text.match(/\{[\s\S]*\}/);
-   return match ? match[0] : null;
+   if (!text) return null;
+   const start = text.indexOf('{');
+   if (start === -1) return null;
+
+   let depth = 0;
+   for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      if (depth === 0) {
+         return text.slice(start, i + 1);
+      }
+   }
+   // No balanced JSON object found
+   return null;
 }
 
 function parseRouterPlan(text: string): RouterPlan | null {
-   const candidate = extractJson(text) ?? text;
+   const raw = extractJson(text) ?? text;
+   const candidate = typeof raw === 'string' ? raw.trim() : '';
+
+   // Only attempt to parse if it looks like a JSON object with balanced braces
+   if (!candidate || !candidate.startsWith('{') || !candidate.endsWith('}')) {
+      return null;
+   }
+
    try {
       const parsed = JSON.parse(candidate) as RouterPlan;
       if (
@@ -492,6 +521,8 @@ function parseRouterPlan(text: string): RouterPlan | null {
          'generalChat',
          'getProductInformation',
          'analyzeReview',
+         'reviewSentiment',
+         'reviewAnalysis',
       ]);
 
       const plan: PlanStep[] = [];
@@ -656,9 +687,25 @@ async function routeMessage(
    const finalize = (message: string): ChatResponse => {
       timings.totalMs = Date.now() - requestStart;
       logPhase(reqId, 'SUMMARY');
+      // Calculate total RAG durations
+      const totalRagRetrieval = timings.rag.reduce(
+         (sum, rag) => sum + (rag.searchMs || 0),
+         0
+      );
+      const totalRagGeneration = timings.rag.reduce(
+         (sum, rag) => sum + (rag.generationMs || 0),
+         0
+      );
+      // Calculate total review durations
+      const totalReviewSentiment = timings.steps
+         .filter((step) => step.tool === 'reviewSentiment')
+         .reduce((sum, step) => sum + (step.durationMs || 0), 0);
+      const totalReviewAnalysis = timings.steps
+         .filter((step) => step.tool === 'reviewAnalysis')
+         .reduce((sum, step) => sum + (step.durationMs || 0), 0);
       logLine(
          reqId,
-         `[SUMMARY] total=${timings.totalMs}ms routing=${timings.routingMs}ms synthesis=${timings.synthesisMs}ms general_chat=${timings.generalChatMs}ms`
+         `[SUMMARY] total=${timings.totalMs}ms routing=${timings.routingMs}ms synthesis=${timings.synthesisMs}ms general_chat=${timings.generalChatMs}ms rag_retrieval=${totalRagRetrieval}ms rag_generation=${totalRagGeneration}ms review_sentiment=${totalReviewSentiment}ms review_analysis=${totalReviewAnalysis}ms`
       );
       if (timings.steps.length > 0) {
          logLine(
@@ -692,6 +739,76 @@ async function routeMessage(
    if (userInput.trim() === '/reset') {
       await resetHistory();
       return finalize('היסטוריית השיחה אופסה. נתחיל שיחה חדשה.');
+   }
+
+   // Auto-run review sentiment/analysis if input contains 'review' or similar
+   const reviewKeywords = ['review', 'ביקורת', 'חוות דעת', 'דעה'];
+   const lowerInput = userInput.toLowerCase();
+   const shouldRunReview = reviewKeywords.some((word) =>
+      lowerInput.includes(word)
+   );
+
+   if (shouldRunReview) {
+      // Review Sentiment
+      const sentimentStart = Date.now();
+      const sentimentResp = await llmClient.generateText({
+         model: 'gpt-4o-mini',
+         instructions: reviewSentimentPrompt,
+         prompt: userInput,
+         temperature: 0.2,
+         maxTokens: 60,
+      });
+      const sentimentDuration = Date.now() - sentimentStart;
+      let sentimentScore = 0;
+      let sentimentLabel = 'neutral';
+      try {
+         const parsed = JSON.parse(sentimentResp.text);
+         sentimentScore = typeof parsed.score === 'number' ? parsed.score : 0;
+         sentimentLabel =
+            typeof parsed.sentiment === 'string' ? parsed.sentiment : 'neutral';
+      } catch {}
+      logLine(
+         reqId,
+         `[ReviewSentiment] duration_ms=${sentimentDuration} score=${sentimentScore} sentiment=${sentimentLabel}`
+      );
+
+      // Review Analysis
+      const analysisStart = Date.now();
+      const analysisResp = await llmClient.generateText({
+         model: 'gpt-4o-mini',
+         instructions: reviewAnalysisPrompt,
+         prompt: userInput,
+         temperature: 0.2,
+         maxTokens: 80,
+      });
+      const analysisDuration = Date.now() - analysisStart;
+      let analysisScore = 0;
+      let analysisSummary = '';
+      try {
+         const parsed = JSON.parse(analysisResp.text);
+         analysisScore = typeof parsed.score === 'number' ? parsed.score : 0;
+         analysisSummary =
+            typeof parsed.summary === 'string' ? parsed.summary : '';
+      } catch {}
+      logLine(
+         reqId,
+         `[ReviewAnalysis] duration_ms=${analysisDuration} score=${analysisScore} summary="${analysisSummary}"`
+      );
+
+      // Add to summary durations
+      timings.steps.push({
+         tool: 'reviewSentiment',
+         durationMs: sentimentDuration,
+      });
+      timings.steps.push({
+         tool: 'reviewAnalysis',
+         durationMs: analysisDuration,
+      });
+
+      // Compose response
+      return finalize(
+         `Review Sentiment: ${sentimentLabel} (score: ${sentimentScore})\nReview Analysis: ${analysisSummary} (score: ${analysisScore})`
+      );
    }
 
    const planResult = await classifyPlan(userInput, reqId);
@@ -942,6 +1059,40 @@ async function routeMessage(
             continue;
          }
 
+         if (step.tool === 'getProductInformation') {
+            const productName =
+               typeof resolvedParameters.product_name === 'string'
+                  ? resolvedParameters.product_name
+                  : '';
+            const query =
+               typeof resolvedParameters.query === 'string'
+                  ? resolvedParameters.query
+                  : '';
+            const response = await getProductInformation(
+               productName,
+               query,
+               reqId
+            );
+            results.push({
+               tool: step.tool,
+               text: response.text,
+               data: response.text,
+            });
+            timings.steps.push({
+               tool: step.tool,
+               durationMs: Date.now() - stepStart,
+            });
+            timings.rag.push({
+               searchMs: response.searchMs,
+               generationMs: response.generationMs,
+            });
+            logLine(
+               reqId,
+               `Step ${stepNumber}/${totalSteps} result="${preview(response.text)}" duration=${Date.now() - stepStart}ms`
+            );
+            continue;
+         }
+
          if (step.tool === 'analyzeReview') {
             const reviewText =
                typeof resolvedParameters.review_text === 'string'
@@ -973,38 +1124,81 @@ async function routeMessage(
             continue;
          }
 
-         if (step.tool === 'getProductInformation') {
-            const productName =
-               typeof resolvedParameters.product_name === 'string'
-                  ? resolvedParameters.product_name
+         if (step.tool === 'reviewSentiment') {
+            const reviewText =
+               typeof resolvedParameters.review_text === 'string'
+                  ? resolvedParameters.review_text
                   : '';
-            const query =
-               typeof resolvedParameters.query === 'string'
-                  ? resolvedParameters.query
-                  : '';
-            const response = await getProductInformation(
-               productName,
-               query,
-               reqId
+            const start = Date.now();
+            const response = await llmClient.generateText({
+               model: 'gpt-4o-mini',
+               instructions: reviewSentimentPrompt,
+               prompt: reviewText,
+               temperature: 0.2,
+               maxTokens: 60,
+            });
+            const durationMs = Date.now() - start;
+            let score = 0;
+            let sentiment = 'neutral';
+            try {
+               const parsed = JSON.parse(response.text);
+               score = typeof parsed.score === 'number' ? parsed.score : 0;
+               sentiment =
+                  typeof parsed.sentiment === 'string'
+                     ? parsed.sentiment
+                     : 'neutral';
+            } catch {}
+            logLine(
+               reqId,
+               `[ReviewSentiment] duration_ms=${durationMs} score=${score} sentiment=${sentiment}`
             );
             results.push({
                tool: step.tool,
-               text: response.text,
-               data: response.text,
+               text: `Sentiment: ${sentiment}, Score: ${score}`,
+               data: score,
             });
-            timings.steps.push({
-               tool: step.tool,
-               durationMs: Date.now() - stepStart,
-            });
-            timings.rag.push({
-               searchMs: response.searchMs,
-               generationMs: response.generationMs,
-            });
+            timings.steps.push({ tool: step.tool, durationMs });
             logLine(
                reqId,
-               `Step ${stepNumber}/${totalSteps} result="${preview(
-                  response.text
-               )}" duration=${Date.now() - stepStart}ms`
+               `Step ${stepNumber}/${totalSteps} result="Sentiment: ${sentiment}, Score: ${score}" duration=${durationMs}ms`
+            );
+            continue;
+         }
+         if (step.tool === 'reviewAnalysis') {
+            const reviewText =
+               typeof resolvedParameters.review_text === 'string'
+                  ? resolvedParameters.review_text
+                  : '';
+            const start = Date.now();
+            const response = await llmClient.generateText({
+               model: 'gpt-4o-mini',
+               instructions: reviewAnalysisPrompt,
+               prompt: reviewText,
+               temperature: 0.2,
+               maxTokens: 80,
+            });
+            const durationMs = Date.now() - start;
+            let score = 0;
+            let summary = '';
+            try {
+               const parsed = JSON.parse(response.text);
+               score = typeof parsed.score === 'number' ? parsed.score : 0;
+               summary =
+                  typeof parsed.summary === 'string' ? parsed.summary : '';
+            } catch {}
+            logLine(
+               reqId,
+               `[ReviewAnalysis] duration_ms=${durationMs} score=${score} summary="${summary}"`
+            );
+            results.push({
+               tool: step.tool,
+               text: `Summary: ${summary}, Score: ${score}`,
+               data: score,
+            });
+            timings.steps.push({ tool: step.tool, durationMs });
+            logLine(
+               reqId,
+               `Step ${stepNumber}/${totalSteps} result="Summary: ${summary}, Score: ${score}" duration=${durationMs}ms`
             );
             continue;
          }

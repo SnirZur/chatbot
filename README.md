@@ -57,3 +57,17 @@ Router features:
 - The server routes weather, math, and exchange-rate queries to local handlers.
 - General chat uses the LLM with persisted conversation history.
 - Use `/reset` to clear the saved history.
+
+
+
+
+operation                      | module       | duration (ms) | precisement
+
+Router                         | ollama       | 9050          | 5
+Router Fallback                | OpenAi       | 2869          | 5
+General chat                   | ollama       | 18889         | 5
+Review sentiment               | Hugging face | 1106          | 5
+Review Analysis                | OpenAi       | 2783          | 5
+RAG retrival                   | Hugging face | 616           | 5
+RAG Generation                 | OpenAi       | 4368          | 5
+Orchestration Synthesis        | OpenAi       | 1193          | 5
