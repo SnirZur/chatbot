@@ -369,7 +369,11 @@ async function getProductInformation(
       .join(' - ');
 
    if (!composedQuery) {
-      return 'לא הועברו פרטים מספיקים כדי לחפש מידע על המוצר.';
+      return {
+         text: 'לא הועברו פרטים מספיקים כדי לחפש מידע על המוצר.',
+         searchMs: 0,
+         generationMs: 0,
+      };
    }
 
    const controller = new AbortController();
@@ -416,7 +420,11 @@ async function getProductInformation(
       );
 
       if (chunks.length === 0) {
-         return 'לא מצאתי מידע רלוונטי במאגר.';
+         return {
+            text: 'לא מצאתי מידע רלוונטי במאגר.',
+            searchMs,
+            generationMs,
+         };
       }
 
       const ragPayload = JSON.stringify(
@@ -561,30 +569,35 @@ async function classifyPlan(
 ): Promise<PlanResult> {
    try {
       const startTime = Date.now();
-      const response = await llmClient.generateText({
-         model: 'gpt-4o-mini',
-         instructions: routerPrompt,
-         prompt: message,
-         temperature: 0,
-         maxTokens: 240,
-         responseFormat: { type: 'json_object' },
+      const ollamaResponse = await llmClient.chatCompletionOllama({
+         model: 'llama3',
+         messages: [
+            { role: 'system', content: routerPrompt },
+            { role: 'user', content: message },
+         ],
       });
 
-      const durationMs = Date.now() - startTime;
-      let parsed = parseRouterPlan(response.text);
-      let rawText = response.text;
-      if (!parsed) {
-         logLine(reqId, '[PLAN] openai parse failed, falling back to ollama');
-         const ollamaResponse = await llmClient.chatCompletionOllama({
-            model: 'llama3',
-            messages: [
-               { role: 'system', content: routerPrompt },
-               { role: 'user', content: message },
-            ],
+      let parsed = parseRouterPlan(ollamaResponse.text);
+      let rawText = ollamaResponse.text;
+      const isLowConfidence = !parsed || parsed.plan.length === 0;
+
+      if (isLowConfidence) {
+         logLine(
+            reqId,
+            '[PLAN] ollama parse failed or empty plan, falling back to openai'
+         );
+         const response = await llmClient.generateText({
+            model: 'gpt-4o-mini',
+            instructions: routerPrompt,
+            prompt: message,
+            temperature: 0,
+            maxTokens: 240,
+            responseFormat: { type: 'json_object' },
          });
-         rawText = ollamaResponse.text;
+         rawText = response.text;
          parsed = parseRouterPlan(rawText);
       }
+      const durationMs = Date.now() - startTime;
       if (!parsed) {
          return {
             plan: { plan: [], final_answer_synthesis_required: false },
