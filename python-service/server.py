@@ -4,6 +4,12 @@ import os
 from pathlib import Path
 from typing import List
 
+# disable telemetry in underlying libraries (prevents telemetry capture() errors)
+os.environ.setdefault("DISABLE_TELEMETRY", "1")
+os.environ.setdefault("CHROMA_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("CHROMA_TELEMETRY_ENABLED", "0")
+os.environ.setdefault("TELEMETRY_DISABLED", "1")
+
 import chromadb
 from fastapi import FastAPI
 from pydantic import BaseModel

@@ -43,6 +43,7 @@ export const llmClient = {
       previousResponseId,
       responseFormat,
    }: GenerateTextOptions): Promise<GenerateTextResult> {
+      const start = Date.now();
       const response = await openAIClient.responses.create({
          model,
          input: prompt,
@@ -51,6 +52,10 @@ export const llmClient = {
          max_output_tokens: maxTokens,
          previous_response_id: previousResponseId,
       });
+      const duration = Date.now() - start;
+      console.log(
+         `[LLM] provider=openai action=responses.create model=${model} duration=${duration}ms`
+      );
 
       return {
          id: response.id,
@@ -69,12 +74,17 @@ export const llmClient = {
       temperature?: number;
       maxTokens?: number;
    }): Promise<GenerateTextResult> {
+      const start = Date.now();
       const response = await openAIClient.chat.completions.create({
          model,
          messages,
          temperature,
          max_tokens: maxTokens,
       });
+      const duration = Date.now() - start;
+      console.log(
+         `[LLM] provider=openai action=chat.completions.create model=${model} duration=${duration}ms`
+      );
 
       return {
          id: response.id,
@@ -89,10 +99,15 @@ export const llmClient = {
       model?: string;
       messages: ChatMessage[];
    }): Promise<GenerateTextResult> {
+      const start = Date.now();
       const response = await ollamaClient.chat({
          model,
          messages,
       });
+      const duration = Date.now() - start;
+      console.log(
+         `[LLM] provider=ollama action=chat model=${model} duration=${duration}ms`
+      );
 
       return {
          id: response.message?.role ?? 'ollama',
@@ -101,6 +116,7 @@ export const llmClient = {
    },
 
    async summarizeReviews(reviews: string) {
+      const start = Date.now();
       const response = await ollamaClient.chat({
          model: 'llama3',
          messages: [
@@ -114,6 +130,10 @@ export const llmClient = {
             },
          ],
       });
+      const duration = Date.now() - start;
+      console.log(
+         `[LLM] provider=ollama action=summarize model=llama3 duration=${duration}ms`
+      );
 
       return response.message.content;
    },

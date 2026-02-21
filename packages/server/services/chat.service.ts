@@ -569,13 +569,23 @@ async function classifyPlan(
 ): Promise<PlanResult> {
    try {
       const startTime = Date.now();
-      const ollamaResponse = await llmClient.chatCompletionOllama({
-         model: 'llama3',
-         messages: [
-            { role: 'system', content: routerPrompt },
-            { role: 'user', content: message },
-         ],
-      });
+      let ollamaResponse = { id: '', text: '' };
+      try {
+         ollamaResponse = await llmClient.chatCompletionOllama({
+            model: 'llama3',
+            messages: [
+               { role: 'system', content: routerPrompt },
+               { role: 'user', content: message },
+            ],
+         });
+      } catch (err) {
+         logLine(
+            reqId,
+            `[PLAN] ollama call failed, will attempt OpenAI fallback: ${
+               err instanceof Error ? err.message : 'Unknown error'
+            }`
+         );
+      }
 
       let parsed = parseRouterPlan(ollamaResponse.text);
       let rawText = ollamaResponse.text;
