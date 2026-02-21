@@ -27,6 +27,14 @@ const parsePlan = (text: string) => {
    return JSON.parse(candidate);
 };
 
+const isValidPlan = (value: unknown) => {
+   if (!value || typeof value !== 'object') return false;
+   const plan = (value as { plan?: unknown }).plan;
+   const synth = (value as { final_answer_synthesis_required?: unknown })
+      .final_answer_synthesis_required;
+   return Array.isArray(plan) && typeof synth === 'boolean';
+};
+
 const sendToDlq = async (payload: unknown, error: string) => {
    const producer = await producerPromise;
    await producer.send({
@@ -107,6 +115,9 @@ await consumer.run({
                user: payload.userInput,
             });
             planJson = parsePlan(ollamaText);
+            if (!isValidPlan(planJson)) {
+               throw new Error('Invalid plan from ollama');
+            }
          } catch {
             const fallbackText = await generateWithOpenAI({
                model: 'gpt-3.5-turbo',
