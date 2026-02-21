@@ -1,4 +1,5 @@
 import { Kafka, Partitioners } from 'kafkajs';
+import { randomUUID } from 'node:crypto';
 
 type BotResponse = {
    message: string;
@@ -8,7 +9,7 @@ type PendingResolver = (message: BotResponse) => void;
 
 const kafka = new Kafka({
    clientId: 'web-gateway',
-   brokers: ['localhost:9092'],
+   brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
 });
 const producer = kafka.producer({
    createPartitioner: Partitioners.LegacyPartitioner,
@@ -19,15 +20,10 @@ const pendingResponses = new Map<string, PendingResolver[]>();
 let initialized = false;
 
 const topics = {
-   userInput: 'user-input-events',
-   userControl: 'user-control-events',
-   botResponses: 'bot-responses',
-   historyUpdate: 'conversation-history-update',
-   appResults: 'app-results',
-   intentMath: 'intent-math',
-   intentWeather: 'intent-weather',
-   intentExchange: 'intent-exchange',
-   intentGeneralChat: 'intent-general-chat',
+   userCommands: 'user-commands',
+   conversationEvents: 'conversation-events',
+   toolInvocationRequests: 'tool-invocation-requests',
+   deadLetterQueue: 'dead-letter-queue',
 } as const;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -78,20 +74,26 @@ const init = async () => {
    await producer.connect();
    await consumer.connect();
    await consumer.subscribe({
-      topic: topics.botResponses,
+      topic: topics.conversationEvents,
       fromBeginning: false,
    });
    consumer.run({
       eachMessage: async ({ message }) => {
-         const key = message.key?.toString() ?? '';
-         if (!key || !message.value) return;
+         if (!message.value) return;
 
          try {
-            const value = JSON.parse(message.value.toString()) as BotResponse;
-            const queue = pendingResponses.get(key);
+            const value = JSON.parse(message.value.toString()) as {
+               conversationId?: string;
+               eventType?: string;
+               payload?: { message?: string };
+            };
+            if (value.eventType !== 'FinalAnswerSynthesized') return;
+            const conversationId = value.conversationId ?? '';
+            if (!conversationId) return;
+            const queue = pendingResponses.get(conversationId);
             const resolver = queue?.shift();
-            if (resolver) {
-               resolver(value);
+            if (resolver && value.payload?.message) {
+               resolver({ message: value.payload.message });
             }
          } catch (error) {
             console.error('Failed to parse bot response:', error);
@@ -116,13 +118,13 @@ export const isKafkaReady = async () => {
    }
 };
 
-const waitForResponse = (userId: string, timeoutMs = 30000) =>
+const waitForResponse = (conversationId: string, timeoutMs = 30000) =>
    new Promise<BotResponse>((resolve, reject) => {
-      const queue = pendingResponses.get(userId) ?? [];
+      const queue = pendingResponses.get(conversationId) ?? [];
       const timer = setTimeout(() => {
-         const current = pendingResponses.get(userId) ?? [];
+         const current = pendingResponses.get(conversationId) ?? [];
          pendingResponses.set(
-            userId,
+            conversationId,
             current.filter((item) => item !== resolve)
          );
          reject(new Error('Timed out waiting for bot response'));
@@ -134,23 +136,46 @@ const waitForResponse = (userId: string, timeoutMs = 30000) =>
       };
 
       queue.push(wrappedResolve);
-      pendingResponses.set(userId, queue);
+      pendingResponses.set(conversationId, queue);
    });
 
 export const sendUserInput = async (userId: string, userInput: string) => {
    await init();
+   const conversationId = randomUUID();
    await producer.send({
-      topic: topics.userInput,
-      messages: [{ key: userId, value: JSON.stringify({ userInput }) }],
+      topic: topics.userCommands,
+      messages: [
+         {
+            key: conversationId,
+            value: JSON.stringify({
+               conversationId,
+               userId,
+               timestamp: new Date().toISOString(),
+               commandType: 'UserQueryReceived',
+               payload: { userInput },
+            }),
+         },
+      ],
    });
 
-   return waitForResponse(userId);
+   return waitForResponse(conversationId);
 };
 
 export const sendReset = async (userId: string) => {
    await init();
    await producer.send({
-      topic: topics.userControl,
-      messages: [{ key: userId, value: JSON.stringify({ command: 'reset' }) }],
+      topic: topics.userCommands,
+      messages: [
+         {
+            key: userId,
+            value: JSON.stringify({
+               conversationId: randomUUID(),
+               userId,
+               timestamp: new Date().toISOString(),
+               commandType: 'UserControl',
+               payload: { command: 'reset' },
+            }),
+         },
+      ],
    });
 };
