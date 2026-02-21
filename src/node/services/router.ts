@@ -5,6 +5,7 @@ import {
    createProducer,
    createConsumer,
    ensureTopics,
+   runConsumerWithRestart,
    waitForKafka,
 } from '../lib/kafka';
 import { topics } from '../lib/topics';
@@ -43,20 +44,29 @@ const sendToDlq = async (payload: unknown, error: string) => {
    });
 };
 
+const processed = new Set<string>();
+
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
 const producer = await producerPromise;
 const consumer = await consumerPromise;
 
-await consumer.subscribe({ topic: topics.userCommands, fromBeginning: false });
+await consumer.subscribe({ topic: topics.userCommands, fromBeginning: true });
 
-await consumer.run({
-   eachMessage: async ({ message }) => {
+await runConsumerWithRestart(
+   consumer,
+   async ({ message }) => {
       try {
          if (!message.value) return;
          const command = JSON.parse(message.value.toString());
          const commandType = command.commandType as string | undefined;
+         const incomingConversationId = String(command.conversationId ?? '');
+         if (incomingConversationId) {
+            const key = `${commandType ?? 'unknown'}:${incomingConversationId}`;
+            if (processed.has(key)) return;
+            processed.add(key);
+         }
          if (commandType === 'UserControl') {
             try {
                validateOrThrow(schemaPaths.userControl, command);
@@ -149,4 +159,5 @@ await consumer.run({
          console.error('router-service failed:', error);
       }
    },
-});
+   'router-service'
+);

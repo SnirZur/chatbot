@@ -3,6 +3,7 @@ import {
    createProducer,
    createConsumer,
    ensureTopics,
+   runConsumerWithRestart,
    waitForKafka,
 } from '../lib/kafka';
 import { topics } from '../lib/topics';
@@ -129,8 +130,9 @@ const recoverRunningPlans = async () => {
 
 await recoverRunningPlans();
 
-await eventsConsumer.run({
-   eachMessage: async ({ message }) => {
+await runConsumerWithRestart(
+   eventsConsumer,
+   async ({ message }) => {
       if (!message.value) return;
       const event = JSON.parse(message.value.toString());
       if (!event || !event.eventType) return;
@@ -251,10 +253,13 @@ await eventsConsumer.run({
          await store.put(conversationId, state);
       }
    },
-});
+   'orchestrator-events'
+);
 
-await requestsConsumer.run({
-   eachMessage: async () => {
+await runConsumerWithRestart(
+   requestsConsumer,
+   async () => {
       // intentionally empty: this consumer keeps the group active to avoid duplicate invocations
    },
-});
+   'orchestrator-requests'
+);

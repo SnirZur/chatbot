@@ -3,6 +3,7 @@ import {
    createProducer,
    createConsumer,
    ensureTopics,
+   runConsumerWithRestart,
    waitForKafka,
 } from '../lib/kafka';
 import { topics } from '../lib/topics';
@@ -26,8 +27,9 @@ await consumer.subscribe({
 const toolResults = new Map<string, unknown[]>();
 const userInputs = new Map<string, string>();
 
-await consumer.run({
-   eachMessage: async ({ message }) => {
+await runConsumerWithRestart(
+   consumer,
+   async ({ message }) => {
       if (!message.value) return;
       const event = JSON.parse(message.value.toString());
       if (!event || !event.eventType) return;
@@ -116,4 +118,5 @@ await consumer.run({
          });
       }
    },
-});
+   'aggregator-service'
+);

@@ -5,6 +5,7 @@ import {
    createProducer,
    createConsumer,
    ensureTopics,
+   runConsumerWithRestart,
    waitForKafka,
 } from '../lib/kafka';
 import { topics } from '../lib/topics';
@@ -32,8 +33,9 @@ await consumer.subscribe({
    fromBeginning: true,
 });
 
-await consumer.run({
-   eachMessage: async ({ message }) => {
+await runConsumerWithRestart(
+   consumer,
+   async ({ message }) => {
       if (!message.value) return;
       const command = JSON.parse(message.value.toString());
       try {
@@ -89,4 +91,5 @@ await consumer.run({
          }
       );
    },
-});
+   'synthesis-worker'
+);

@@ -14,7 +14,10 @@ const kafka = new Kafka({
 const producer = kafka.producer({
    createPartitioner: Partitioners.LegacyPartitioner,
 });
-const consumer = kafka.consumer({ groupId: 'web-gateway-group' });
+const consumer = kafka.consumer({
+   groupId: 'web-gateway-group',
+   allowAutoTopicCreation: true,
+});
 
 const pendingResponses = new Map<string, PendingResolver[]>();
 let initialized = false;
@@ -28,6 +31,40 @@ const topics = {
 } as const;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const runConsumerWithRestart = async (delayMs = 2000) => {
+   while (true) {
+      try {
+         await consumer.run({
+            eachMessage: async ({ message }) => {
+               if (!message.value) return;
+
+               try {
+                  const value = JSON.parse(message.value.toString()) as {
+                     conversationId?: string;
+                     eventType?: string;
+                     payload?: { message?: string };
+                  };
+                  if (value.eventType !== 'FinalAnswerSynthesized') return;
+                  const conversationId = value.conversationId ?? '';
+                  if (!conversationId) return;
+                  const queue = pendingResponses.get(conversationId);
+                  const resolver = queue?.shift();
+                  if (resolver && value.payload?.message) {
+                     resolver({ message: value.payload.message });
+                  }
+               } catch (error) {
+                  console.error('Failed to parse bot response:', error);
+               }
+            },
+         });
+         return;
+      } catch (error) {
+         console.error('web-gateway consumer crashed, restarting...', error);
+         await delay(delayMs);
+      }
+   }
+};
 
 const waitForKafka = async (retries = 20, delayMs = 3000) => {
    for (let attempt = 1; attempt <= retries; attempt += 1) {
@@ -78,29 +115,7 @@ const init = async () => {
       topic: topics.conversationEvents,
       fromBeginning: false,
    });
-   consumer.run({
-      eachMessage: async ({ message }) => {
-         if (!message.value) return;
-
-         try {
-            const value = JSON.parse(message.value.toString()) as {
-               conversationId?: string;
-               eventType?: string;
-               payload?: { message?: string };
-            };
-            if (value.eventType !== 'FinalAnswerSynthesized') return;
-            const conversationId = value.conversationId ?? '';
-            if (!conversationId) return;
-            const queue = pendingResponses.get(conversationId);
-            const resolver = queue?.shift();
-            if (resolver && value.payload?.message) {
-               resolver({ message: value.payload.message });
-            }
-         } catch (error) {
-            console.error('Failed to parse bot response:', error);
-         }
-      },
-   });
+   void runConsumerWithRestart();
    initialized = true;
 };
 
