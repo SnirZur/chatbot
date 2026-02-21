@@ -7,9 +7,14 @@ type BotResponse = {
 
 type PendingResolver = (message: BotResponse) => void;
 
-let kafka: Kafka | null = null;
-let producer: ReturnType<Kafka['producer']> | null = null;
-let consumer: ReturnType<Kafka['consumer']> | null = null;
+const kafka = new Kafka({
+   clientId: 'web-gateway',
+   brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
+});
+const producer = kafka.producer({
+   createPartitioner: Partitioners.LegacyPartitioner,
+});
+const consumer = kafka.consumer({ groupId: 'web-gateway-group' });
 
 const pendingResponses = new Map<string, PendingResolver[]>();
 let initialized = false;
@@ -26,7 +31,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const waitForKafka = async (retries = 20, delayMs = 3000) => {
    for (let attempt = 1; attempt <= retries; attempt += 1) {
-      const admin = kafka!.admin();
+      const admin = kafka.admin();
       try {
          await admin.connect();
          await admin.disconnect();
@@ -43,7 +48,7 @@ const waitForKafka = async (retries = 20, delayMs = 3000) => {
 };
 
 const ensureTopics = async () => {
-   const admin = kafka!.admin();
+   const admin = kafka.admin();
    await admin.connect();
    try {
       await admin.createTopics({
@@ -61,33 +66,19 @@ const ensureTopics = async () => {
 
 const init = async () => {
    if (initialized) return;
-   if (!kafka) {
-      kafka = new Kafka({
-         clientId: 'web-gateway',
-         brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
-      });
-   }
-   if (!producer) {
-      producer = kafka.producer({
-         createPartitioner: Partitioners.LegacyPartitioner,
-      });
-   }
-   if (!consumer) {
-      consumer = kafka.consumer({ groupId: 'web-gateway-group' });
-   }
    await waitForKafka();
    try {
       await ensureTopics();
    } catch (error) {
       console.warn('Topic creation failed or already exists:', error);
    }
-   await producer!.connect();
-   await consumer!.connect();
-   await consumer!.subscribe({
+   await producer.connect();
+   await consumer.connect();
+   await consumer.subscribe({
       topic: topics.conversationEvents,
       fromBeginning: false,
    });
-   consumer!.run({
+   consumer.run({
       eachMessage: async ({ message }) => {
          if (!message.value) return;
 
@@ -114,7 +105,7 @@ const init = async () => {
 };
 
 export const isKafkaReady = async () => {
-   const admin = kafka!.admin();
+   const admin = kafka.admin();
    try {
       await admin.connect();
       const existing = await admin.listTopics();
@@ -152,7 +143,7 @@ const waitForResponse = (conversationId: string, timeoutMs = 30000) =>
 export const sendUserInput = async (userId: string, userInput: string) => {
    await init();
    const conversationId = randomUUID();
-   await producer!.send({
+   await producer.send({
       topic: topics.userCommands,
       messages: [
          {
@@ -173,7 +164,7 @@ export const sendUserInput = async (userId: string, userInput: string) => {
 
 export const sendReset = async (userId: string) => {
    await init();
-   await producer!.send({
+   await producer.send({
       topic: topics.userCommands,
       messages: [
          {
