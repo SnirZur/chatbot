@@ -35,6 +35,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["src/node/services/router.ts"]
     depends_on:
       - kafka
@@ -48,6 +49,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["src/node/services/orchestrator.ts"]
     depends_on:
       - kafka
@@ -59,6 +61,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["src/node/services/tool-worker.ts"]
     depends_on:
       - kafka
@@ -71,6 +74,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["src/node/services/llm-inference-worker.ts"]
     depends_on:
       - kafka
@@ -84,6 +88,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["src/node/services/synthesis-worker.ts"]
     depends_on:
       - kafka
@@ -96,6 +101,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["src/node/services/aggregator.ts"]
     depends_on:
       - kafka
@@ -107,6 +113,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["src/node/services/history-projection.ts"]
     depends_on:
       - kafka
@@ -118,6 +125,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["src/node/services/metrics.ts"]
     depends_on:
       - kafka
@@ -141,6 +149,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["--cwd", "packages/server", "run", "dev"]
     depends_on:
       - kafka
@@ -152,6 +161,7 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
+    entrypoint: ["bun"]
     command: ["--cwd", "packages/client", "run", "dev", "--", "--host"]
     depends_on:
       - server

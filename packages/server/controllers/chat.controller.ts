@@ -16,6 +16,7 @@ const chatSchema = z.object({
 // Public interface
 export const chatController = {
    async getKafkaHealth(_req: Request, res: Response) {
+      res.setHeader('Cache-Control', 'no-store');
       const ready = await isKafkaReady();
       res.json({ ready });
    },
