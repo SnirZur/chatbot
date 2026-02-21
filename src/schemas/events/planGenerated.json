@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["conversationId", "userId", "timestamp", "eventType", "payload"],
+  "properties": {
+    "conversationId": { "type": "string" },
+    "userId": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "eventType": { "const": "PlanGenerated" },
+    "payload": {
+      "type": "object",
+      "required": ["plan", "final_answer_synthesis_required"],
+      "properties": {
+        "plan": { "type": "array" },
+        "final_answer_synthesis_required": { "type": "boolean" }
+      }
+    }
+  }
+}

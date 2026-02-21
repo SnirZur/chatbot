@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["conversationId", "userId", "timestamp", "commandType", "payload"],
+  "properties": {
+    "conversationId": { "type": "string" },
+    "userId": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "commandType": { "const": "ToolInvocationRequested" },
+    "payload": {
+      "type": "object",
+      "required": ["invocationId", "tool", "parameters", "stepIndex"],
+      "properties": {
+        "invocationId": { "type": "string" },
+        "tool": { "type": "string" },
+        "parameters": { "type": "object" },
+        "stepIndex": { "type": "number" }
+      }
+    }
+  }
+}
