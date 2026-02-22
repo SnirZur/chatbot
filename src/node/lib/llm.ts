@@ -2,7 +2,9 @@ import OpenAI from 'openai';
 import { Ollama } from 'ollama';
 
 const openAIClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const ollamaClient = new Ollama();
+const ollamaClient = new Ollama({
+   host: process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
+});
 
 export const generateWithOpenAI = async ({
    model = 'gpt-3.5-turbo',

@@ -31,20 +31,26 @@ This project implements an event-sourced, CQRS-style tool-orchestrating agent ov
 - **Metrics**: computes end‑to‑end latency, per‑tool latency, throughput, and best‑effort consumer lag.
 
 ## Run Instructions
-1. Set environment variables:
+1. Set environment variables (in `.env` or your shell):
 ```
 OPENAI_API_KEY=...
 WEATHER_API_KEY=...
 ```
-2. Start stack:
+2. Start the stack:
 ```
 docker compose up -d
 ```
-3. (Optional) run services locally for development:
+3. Ensure the Ollama model exists (one time):
 ```
-bun run services
-bun --cwd packages/server run dev
+docker compose exec ollama ollama pull llama3
+```
+4. Open the UI (default Vite dev server):
+```
 bun --cwd packages/client run dev
+```
+5. (Optional) run the server locally instead of Docker:
+```
+bun --cwd packages/server run dev
 ```
 
 ## Benchmarking
