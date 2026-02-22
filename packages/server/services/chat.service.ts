@@ -284,6 +284,20 @@ function calculateMath(expression: string): number {
    return final as number;
 }
 
+function safeEvalMath(expression: string): number {
+   if (!isExpressionClean(expression)) {
+      return Number.NaN;
+   }
+   try {
+      // Sanitized expression: digits/operators/parentheses/dot only.
+      // eslint-disable-next-line no-new-func
+      const result = Function(`"use strict"; return (${expression});`)();
+      return Number.isFinite(result) ? result : Number.NaN;
+   } catch {
+      return Number.NaN;
+   }
+}
+
 function getExchangeRate(
    from: string,
    to = 'ILS'
@@ -1008,7 +1022,10 @@ async function routeMessage(
             }
 
             const result = calculateMath(expression);
-            if (!Number.isFinite(result)) {
+            const finalResult = Number.isFinite(result)
+               ? result
+               : safeEvalMath(expression);
+            if (!Number.isFinite(finalResult)) {
                const fallback = 'לא הצלחתי לחשב את הביטוי שביקשת.';
                results.push({
                   tool: step.tool,
@@ -1031,11 +1048,11 @@ async function routeMessage(
                continue;
             }
 
-            const responseText = `התוצאה היא ${result}`;
+            const responseText = `התוצאה היא ${finalResult}`;
             results.push({
                tool: step.tool,
                text: responseText,
-               data: result,
+               data: finalResult,
             });
             timings.steps.push({
                tool: step.tool,
