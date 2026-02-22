@@ -46,18 +46,24 @@ docker compose up -d
 ```
 docker compose exec ollama ollama pull llama3
 ```
-4. Web gateway API is available on port 3000:
+4. Generate Prisma client for Docker runtime:
+```
+bunx --cwd packages/server prisma generate
+```
+5. Web gateway API is available on port 3000:
 ```
 http://localhost:3000
 ```
-5. Open the UI (default Vite dev server):
+6. Open the UI (default Vite dev server):
 ```
 bun --cwd packages/client run dev
 ```
-6. (Optional) run the server locally instead of Docker:
+7. (Optional) run the server locally instead of Docker:
 ```
 bun --cwd packages/server run dev
 ```
+Review endpoints (`/api/products/:id/reviews`) require Prisma + DB. Set
+`ENABLE_REVIEWS=true` and configure `DATABASE_URL` if you want them enabled.
 If you run the server locally and change Prisma schema, regenerate client:
 ```
 bunx --cwd packages/server prisma generate

@@ -155,13 +155,14 @@ services:
     working_dir: /app/packages/server
     volumes:
       - ./:/app
-    entrypoint: ["sh", "-c"]
-    command: "bunx prisma generate && bun run index.ts"
+    command: sh -c "bun --no-install run index.ts"
     depends_on:
       - kafka
     environment:
       KAFKA_BROKERS: kafka:9092
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      HUSKY: "0"
+      ENABLE_REVIEWS: "false"
     ports:
       - "3000:3000"
 
