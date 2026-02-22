@@ -70,6 +70,18 @@ RAG retrival                   | Hugging face | 616           | 5
 RAG Generation                 | OpenAi       | 4368          | 5
 Orchestration Synthesis        | OpenAi       | 1193          | 5
 
+Real demo timings (from latest `execution-log.md`)
+
+operation                      | module       | duration (ms) | precisement
+
+Router (math)                  | OpenAi       | 1202          | 5
+Router (weather+fx)            | OpenAi       | 1206          | 5
+Synthesis (weather+fx)         | OpenAi       | 2497          | 5
+RAG retrieval (EvoPhone X)     | Python/Chroma| 318           | 5
+RAG generation (EvoPhone X)    | OpenAi       | 1245          | 5
+RAG retrieval (PrintForge)     | Python/Chroma| 115           | 5
+RAG generation (PrintForge)    | OpenAi       | 4700          | 5
+
 
 ---
 
