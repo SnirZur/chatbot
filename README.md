@@ -54,6 +54,7 @@ Router features:
 - The server generates tool plans (JSON) and orchestrates multi-step execution.
 - General chat uses Llama3; planning falls back to OpenAI if JSON is invalid.
 - Use `/reset` to clear the saved history.
+- Review-only prompts run quick sentiment + analysis unless a product spec is requested, in which case the router handles it.
 
 
 

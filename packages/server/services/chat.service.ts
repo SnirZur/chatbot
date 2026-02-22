@@ -728,10 +728,21 @@ async function routeMessage(
 
    // Auto-run review sentiment/analysis if input contains 'review' or similar
    const reviewKeywords = ['review', 'ביקורת', 'חוות דעת', 'דעה'];
+   const productHints = [
+      'evophone',
+      'brewmaster',
+      'printforge',
+      'voltrider',
+      'מפרט',
+      'spec',
+      'specs',
+      'לפי מפרט',
+      'לפי המפרט',
+   ];
    const lowerInput = userInput.toLowerCase();
-   const shouldRunReview = reviewKeywords.some((word) =>
-      lowerInput.includes(word)
-   );
+   const shouldRunReview =
+      reviewKeywords.some((word) => lowerInput.includes(word)) &&
+      !productHints.some((hint) => lowerInput.includes(hint));
 
    if (shouldRunReview) {
       // Review Sentiment
