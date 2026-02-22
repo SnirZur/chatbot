@@ -1,5 +1,8 @@
 # dependencies (bun install)
 node_modules
+.venv/
+.state/
+python-service/chroma_db/
 
 # output
 out
