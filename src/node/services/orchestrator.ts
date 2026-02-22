@@ -41,6 +41,9 @@ const resolvePlaceholders = (
             if (output && typeof output === 'object' && 'data' in output) {
                return String((output as { data: unknown }).data ?? '');
             }
+            if (output && typeof output === 'object' && 'rate' in output) {
+               return String((output as { rate: unknown }).rate ?? '');
+            }
             if (output && typeof output === 'object' && 'text' in output) {
                return String((output as { text: unknown }).text ?? '');
             }
