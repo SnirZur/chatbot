@@ -7,55 +7,52 @@ This repository contains the complete source code for the course **Build AI-Powe
 https://codewithmosh.com/p/build-ai-powered-apps
 
 
-## Local setup
+## Local setup (Final Project: Tool Orchestration + RAG)
 
-1) Install Bun: https://bun.sh
+1) Install Bun: https://bun.sh  
 2) Install dependencies (repo root):
 
 ```
 bun install
 ```
 
-3) Start MySQL:
-
-```
-docker compose up -d
-```
-
-4) Create `packages/server/.env`:
+3) Create `packages/server/.env`:
 
 ```
 OPENAI_API_KEY=sk-...
-DATABASE_URL="mysql://jennifer:jennifer@localhost:3306/ai_course"
 WEATHER_API_KEY=...
+RAG_SERVICE_URL=http://localhost:8000
 ```
 
-5) Run migrations:
+4) Start Python RAG service (separate terminal):
+
+```
+cd python-service
+python3 index_kb.py
+uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+5) Run server (separate terminal):
 
 ```
 cd packages/server
-bunx prisma migrate deploy
-```
-
-6) Generate Prisma client:
-
-```
-bunx prisma generate
-```
-
-7) Run the app (client + server):
-
-```
-cd ../..
 bun run dev
 ```
 
-Client: http://localhost:5137
-Server: http://localhost:3000
+6) Run client (separate terminal):
+
+```
+cd packages/client
+bun run dev
+```
+
+Client: http://localhost:5137  
+Server: http://localhost:3000  
+RAG Service: http://localhost:8000
 
 Router features:
-- The server routes weather, math, and exchange-rate queries to local handlers.
-- General chat uses the LLM with persisted conversation history.
+- The server generates tool plans (JSON) and orchestrates multi-step execution.
+- General chat uses Llama3; planning falls back to OpenAI if JSON is invalid.
 - Use `/reset` to clear the saved history.
 
 

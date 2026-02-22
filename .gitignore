@@ -36,3 +36,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # runtime history
 history.json
 .venv
+.state
+python-service/chroma_db/

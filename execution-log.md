@@ -73,3 +73,16 @@ Server log: [ORCH] [req-006] [RAG] Embeddings computed in python-service (not lo
 Server log: [ORCH] [req-006] [RAG] context_preview="{\"product\":\"BrewMaster 360\",\"user_query\":\"summary, known issues, maintenance\",\"knowledge_chunks\":[\"BrewMaster 360 is a fictional countertop espresso and drip hybrid...\"..."
 Server log: [ORCH] [req-006] Step 2/2 result="מכונת BrewMaster 360 היא מכונת אספרסו/פילטר עם מיכל 1.6 ל׳..." duration=482ms
 Bot: הביקורת שלילית (קפה חלש ורעש). לפי המפרט, זו מכונת אספרסו/פילטר עם משאבת 19 בר ומיכל 1.6 ל׳, ודורשת שטיפה אחרי שימוש והסרת אבנית כל 6–8 שבועות. אם הרעש קריטי לך, שים לב שהמשאבה סביב 68dB.
+
+Session 7 (Updated, current router + orchestration)
+User: אם ליוסי יש 200 ש"ח ומוצר עולה 25 דולר, כמה יישאר לו אחרי ההמרה והקנייה?
+Server log: [PLAN.raw] {"plan":[{"tool":"getExchangeRate","parameters":{"from":"USD","to":"ILS"}},{"tool":"calculateMath","parameters":{"expression":"200 - (25 * <result_from_tool_1>)"}}],"final_answer_synthesis_required":true}
+Server log: Step 1 result: שער הדולר היציג הוא 3.75 ש״ח
+Server log: Step 2 result: התוצאה היא 106.25
+Bot: ליוסי יישארו 106.25 ש"ח אחרי ההמרה והקנייה.
+
+Session 8 (RAG, updated)
+User: מה זמן הסוללה של EvoPhone X?
+Server log: [PLAN.raw] {"plan":[{"tool":"getProductInformation","parameters":{"product_name":"EvoPhone X","query":"battery life"}}],"final_answer_synthesis_required":false}
+Server log: [RAG Retrieval] chunks_received=3
+Bot: EvoPhone X מציע סוללה בנפח של 4,800 mAh עם זמן פעולה ממוצע של 24 שעות וניגון וידאו עד 18 שעות.

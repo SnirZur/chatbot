@@ -32,6 +32,9 @@ User: "מה מזג האוויר בפריז וכמה הדולר שווה היום
 User: "הנה ביקורת קצרה: 'קפה חלש ורועש' — תנתח ותתן מידע על מכונת הקפה BrewMaster 360"
 {"plan":[{"tool":"analyzeReview","parameters":{"review_text":"קפה חלש ורועש"}},{"tool":"getProductInformation","parameters":{"product_name":"BrewMaster 360","query":"summary, known issues, maintenance"}},{"tool":"generalChat","parameters":{"message":"סכם את הניתוח ואת מידע המוצר יחד עם המלצה קצרה. השתמש ב:<result_from_tool_1> ו-<result_from_tool_2>"}}],"final_answer_synthesis_required":false}
 
+User: "הנה ביקורת: 'המדפסת רועשת אבל האיכות מעולה'. לפי מפרט PrintForge Mini, האם זה מתאים לבית?"
+{"plan":[{"tool":"analyzeReview","parameters":{"review_text":"המדפסת רועשת אבל האיכות מעולה"}},{"tool":"getProductInformation","parameters":{"product_name":"PrintForge Mini","query":"home use, noise level, key specs"} }],"final_answer_synthesis_required":true}
+
 User: "ליוסי יש 100 ש״ח, מוצר X עולה 25 דולר — כמה יישאר לו?"
 {"plan":[{"tool":"getExchangeRate","parameters":{"from":"USD","to":"ILS"}},{"tool":"calculateMath","parameters":{"expression":"100 - (25 * <result_from_tool_1>)"}}],"final_answer_synthesis_required":true}
 `.trim();

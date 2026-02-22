@@ -1,4 +1,5 @@
 import path from 'path';
+import z from 'zod';
 import { llmClient } from '../llm/client';
 import {
    debugEnabled,
@@ -111,6 +112,27 @@ type RouterPlan = {
    plan: PlanStep[];
    final_answer_synthesis_required: boolean;
 };
+
+const toolNameSchema = z.enum([
+   'getWeather',
+   'calculateMath',
+   'getExchangeRate',
+   'generalChat',
+   'getProductInformation',
+   'analyzeReview',
+   'reviewSentiment',
+   'reviewAnalysis',
+]);
+
+const routerPlanSchema = z.object({
+   plan: z.array(
+      z.object({
+         tool: toolNameSchema,
+         parameters: z.record(z.unknown()),
+      })
+   ),
+   final_answer_synthesis_required: z.boolean(),
+});
 
 const reviewSentimentPrompt = `Analyze the sentiment of the following review. Respond with a JSON object: { "score": number (0-1), "sentiment": "positive" | "neutral" | "negative" }`;
 const reviewAnalysisPrompt = `Analyze the following review and provide a score (0-1) and a short summary. Respond with a JSON object: { "score": number (0-1), "summary": string }`;
@@ -505,49 +527,12 @@ function parseRouterPlan(text: string): RouterPlan | null {
    }
 
    try {
-      const parsed = JSON.parse(candidate) as RouterPlan;
-      if (
-         !parsed ||
-         !Array.isArray(parsed.plan) ||
-         typeof parsed.final_answer_synthesis_required !== 'boolean'
-      ) {
+      const parsed = JSON.parse(candidate);
+      const validation = routerPlanSchema.safeParse(parsed);
+      if (!validation.success) {
          return null;
       }
-
-      const allowedTools = new Set<ToolName>([
-         'getWeather',
-         'calculateMath',
-         'getExchangeRate',
-         'generalChat',
-         'getProductInformation',
-         'analyzeReview',
-         'reviewSentiment',
-         'reviewAnalysis',
-      ]);
-
-      const plan: PlanStep[] = [];
-      for (const step of parsed.plan) {
-         if (
-            !step ||
-            typeof step.tool !== 'string' ||
-            !allowedTools.has(step.tool as ToolName) ||
-            typeof step.parameters !== 'object' ||
-            step.parameters === null ||
-            Array.isArray(step.parameters)
-         ) {
-            return null;
-         }
-         plan.push({
-            tool: step.tool as ToolName,
-            parameters: step.parameters as Record<string, unknown>,
-         });
-      }
-
-      return {
-         plan,
-         final_answer_synthesis_required:
-            parsed.final_answer_synthesis_required,
-      };
+      return validation.data as RouterPlan;
    } catch (error) {
       console.error('Failed to parse router JSON:', error);
       return null;
@@ -846,6 +831,21 @@ async function routeMessage(
       data?: string | number;
    };
 
+   const extractNumericValue = (result: ToolResult): string | null => {
+      if (typeof result.data === 'number' && Number.isFinite(result.data)) {
+         return String(result.data);
+      }
+      if (typeof result.data === 'string') {
+         const match = result.data.match(/-?\d+(?:\.\d+)?/);
+         if (match) return match[0];
+      }
+      if (typeof result.text === 'string') {
+         const match = result.text.match(/-?\d+(?:\.\d+)?/);
+         if (match) return match[0];
+      }
+      return null;
+   };
+
    const resolvePlaceholders = (
       value: unknown,
       results: ToolResult[],
@@ -889,6 +889,24 @@ async function routeMessage(
       return value;
    };
 
+   const resolvePlaceholdersNumeric = (
+      value: string,
+      results: ToolResult[],
+      reqId: string
+   ): string =>
+      value.replace(/<result_from_tool_(\d+)>/g, (_match, index) => {
+         const result = results[Number(index) - 1];
+         if (!result) return '';
+         const numeric = extractNumericValue(result);
+         logLine(
+            reqId,
+            `[SUBST.numeric] <result_from_tool_${index}> -> "${preview(
+               numeric ?? ''
+            )}"`
+         );
+         return numeric ?? '';
+      });
+
    const results: ToolResult[] = [];
 
    logPhase(reqId, 'EXECUTION');
@@ -903,6 +921,18 @@ async function routeMessage(
          results,
          reqId
       ) as Record<string, unknown>;
+
+      if (step.tool === 'calculateMath') {
+         const rawExpression =
+            typeof step.parameters.expression === 'string'
+               ? step.parameters.expression
+               : '';
+         resolvedParameters.expression = resolvePlaceholdersNumeric(
+            rawExpression,
+            results,
+            reqId
+         );
+      }
 
       logLine(
          reqId,
