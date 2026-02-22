@@ -8,6 +8,8 @@ export type ConversationHistory = ConversationTurn[];
 
 export type UserInputEvent = {
    userInput: string;
+   conversationId?: string;
+   conversationStartedAt?: string;
 };
 
 export type UserControlEvent = {

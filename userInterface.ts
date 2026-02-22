@@ -26,6 +26,11 @@ const userIdInput = await rl.question(
 );
 const userId = userIdInput.trim() || crypto.randomUUID();
 console.log(`Using userId: ${userId}`);
+let conversationId = crypto.randomUUID();
+let conversationStartedAt = new Date().toISOString();
+console.log(
+   `Conversation started: ${conversationId} at ${conversationStartedAt}`
+);
 
 await producer.connect();
 await consumer.connect();
@@ -52,10 +57,19 @@ while (true) {
          topic: topics.userControl,
          messages: [{ key: userId, value: JSON.stringify(payload) }],
       });
+      conversationId = crypto.randomUUID();
+      conversationStartedAt = new Date().toISOString();
+      console.log(
+         `Conversation restarted: ${conversationId} at ${conversationStartedAt}`
+      );
       continue;
    }
 
-   const payload: UserInputEvent = { userInput: trimmed };
+   const payload: UserInputEvent = {
+      userInput: trimmed,
+      conversationId,
+      conversationStartedAt,
+   };
    await producer.send({
       topic: topics.userInput,
       messages: [{ key: userId, value: JSON.stringify(payload) }],
