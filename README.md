@@ -58,6 +58,10 @@ bun --cwd packages/client run dev
 ```
 bun --cwd packages/server run dev
 ```
+If you run the server locally and change Prisma schema, regenerate client:
+```
+bunx --cwd packages/server prisma generate
+```
 
 ## Benchmarking
 See `BENCHMARK.md` for a detailed table. Key metrics captured by the metrics service:

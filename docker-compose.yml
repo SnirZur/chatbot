@@ -155,8 +155,8 @@ services:
     working_dir: /app/packages/server
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["run", "index.ts"]
+    entrypoint: ["sh", "-c"]
+    command: "bunx prisma generate && bun run index.ts"
     depends_on:
       - kafka
     environment:
