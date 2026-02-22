@@ -1,13 +1,20 @@
 import {
    createKafka,
+   createProducer,
    createConsumer,
    ensureTopics,
    runConsumerWithRestart,
    waitForKafka,
 } from '../lib/kafka';
 import { topics } from '../lib/topics';
+import { schemaPaths, validateOrThrow } from '../lib/schema';
+import {
+   publishSchemasOnce,
+   startSchemaRegistryConsumer,
+} from '../lib/schemaRegistry';
 
 const kafka = createKafka('metrics-service');
+const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'metrics-service-group');
 
 const timelines = new Map<string, Record<string, string>>();
@@ -18,6 +25,9 @@ let startWindow = Date.now();
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
+const producer = await producerPromise;
+await publishSchemasOnce(producer);
+await startSchemaRegistryConsumer(kafka, 'metrics-schema-registry');
 const consumer = await consumerPromise;
 await consumer.subscribe({
    topic: topics.conversationEvents,
@@ -31,6 +41,82 @@ await runConsumerWithRestart(
       const event = JSON.parse(message.value.toString());
       if (!event?.conversationId || !event?.eventType || !event?.timestamp)
          return;
+
+      if (event.eventType === 'UserQueryReceived') {
+         try {
+            validateOrThrow(schemaPaths.userQueryEvent, event);
+         } catch (error) {
+            await producer.send({
+               topic: topics.deadLetterQueue,
+               messages: [
+                  {
+                     value: JSON.stringify({
+                        error: (error as Error).message,
+                        payload: event,
+                     }),
+                  },
+               ],
+            });
+            return;
+         }
+      }
+
+      if (event.eventType === 'ToolInvocationRequested') {
+         try {
+            validateOrThrow(schemaPaths.toolInvocationRequestedEvent, event);
+         } catch (error) {
+            await producer.send({
+               topic: topics.deadLetterQueue,
+               messages: [
+                  {
+                     value: JSON.stringify({
+                        error: (error as Error).message,
+                        payload: event,
+                     }),
+                  },
+               ],
+            });
+            return;
+         }
+      }
+
+      if (event.eventType === 'ToolInvocationResulted') {
+         try {
+            validateOrThrow(schemaPaths.toolInvocationResulted, event);
+         } catch (error) {
+            await producer.send({
+               topic: topics.deadLetterQueue,
+               messages: [
+                  {
+                     value: JSON.stringify({
+                        error: (error as Error).message,
+                        payload: event,
+                     }),
+                  },
+               ],
+            });
+            return;
+         }
+      }
+
+      if (event.eventType === 'FinalAnswerSynthesized') {
+         try {
+            validateOrThrow(schemaPaths.finalAnswerSynthesized, event);
+         } catch (error) {
+            await producer.send({
+               topic: topics.deadLetterQueue,
+               messages: [
+                  {
+                     value: JSON.stringify({
+                        error: (error as Error).message,
+                        payload: event,
+                     }),
+                  },
+               ],
+            });
+            return;
+         }
+      }
 
       const timeline = timelines.get(event.conversationId) ?? {};
       timeline[event.eventType] = event.timestamp;

@@ -1,4 +1,6 @@
 import { Kafka, Partitioners } from 'kafkajs';
+import fs from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 type BotResponse = {
@@ -28,6 +30,7 @@ const topics = {
    toolInvocationRequests: 'tool-invocation-requests',
    synthesisRequests: 'synthesis-requests',
    deadLetterQueue: 'dead-letter-queue',
+   schemaRegistry: 'schema-registry',
 } as const;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -101,6 +104,38 @@ const ensureTopics = async () => {
    }
 };
 
+let publishedSchemas = false;
+const publishSchemasOnce = async () => {
+   if (publishedSchemas) return;
+   const schemaRoot = path.resolve('src', 'schemas');
+   if (!fs.existsSync(schemaRoot)) return;
+   const entries: Array<{ schemaPath: string; schema: unknown }> = [];
+   const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+         const fullPath = path.join(dir, entry.name);
+         if (entry.isDirectory()) walk(fullPath);
+         if (entry.isFile() && entry.name.endsWith('.json')) {
+            const raw = fs.readFileSync(fullPath, 'utf-8');
+            const schema = JSON.parse(raw);
+            const schemaPath = path
+               .relative(schemaRoot, fullPath)
+               .replace(/\\/g, '/');
+            entries.push({ schemaPath, schema });
+         }
+      }
+   };
+   walk(schemaRoot);
+   if (!entries.length) return;
+   await producer.send({
+      topic: topics.schemaRegistry,
+      messages: entries.map((entry) => ({
+         key: entry.schemaPath,
+         value: JSON.stringify(entry),
+      })),
+   });
+   publishedSchemas = true;
+};
+
 const init = async () => {
    if (initialized) return;
    await waitForKafka();
@@ -110,6 +145,7 @@ const init = async () => {
       console.warn('Topic creation failed or already exists:', error);
    }
    await producer.connect();
+   await publishSchemasOnce();
    await consumer.connect();
    await consumer.subscribe({
       topic: topics.conversationEvents,

@@ -13,6 +13,7 @@ This project implements an event-sourced, CQRS-style tool-orchestrating agent ov
 - **Stateful Orchestrator**: maintains plan state in LevelDB and recovers after restart.
 - **Idempotent Workers**: tool workers de-duplicate `invocationId` to avoid double effects.
 - **Schema validation + DLQ**: all producers/consumers validate against JSON schemas and send invalid messages to `dead-letter-queue`.
+- **Schema registry topic**: JSON schemas are published to `schema-registry` on startup and cached by services.
 
 ## Kafka Topics
 - `user-commands`
@@ -20,6 +21,7 @@ This project implements an event-sourced, CQRS-style tool-orchestrating agent ov
 - `tool-invocation-requests`
 - `synthesis-requests`
 - `dead-letter-queue`
+- `schema-registry`
 
 ## Services
 - **Web UI / Gateway**: uses the existing UI identifier flow. Produces `UserQueryReceived` commands and waits for `FinalAnswerSynthesized` events.
@@ -44,11 +46,15 @@ docker compose up -d
 ```
 docker compose exec ollama ollama pull llama3
 ```
-4. Open the UI (default Vite dev server):
+4. Web gateway API is available on port 3000:
+```
+http://localhost:3000
+```
+5. Open the UI (default Vite dev server):
 ```
 bun --cwd packages/client run dev
 ```
-5. (Optional) run the server locally instead of Docker:
+6. (Optional) run the server locally instead of Docker:
 ```
 bun --cwd packages/server run dev
 ```

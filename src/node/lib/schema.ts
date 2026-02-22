@@ -2,6 +2,7 @@ import Ajv, { type ValidateFunction } from 'ajv';
 import fs from 'node:fs';
 import path from 'node:path';
 import { topics } from './topics';
+import { getRegistrySchema } from './schemaRegistry';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
@@ -10,6 +11,8 @@ const schemaCache = new Map<string, ValidateFunction>();
 const schemaRoot = path.resolve('src', 'schemas');
 
 const loadSchema = (schemaPath: string) => {
+   const cached = getRegistrySchema(schemaPath);
+   if (cached) return cached;
    const fullPath = path.resolve(schemaRoot, schemaPath);
    const raw = fs.readFileSync(fullPath, 'utf-8');
    return JSON.parse(raw);

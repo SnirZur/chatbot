@@ -10,6 +10,10 @@ import { topics } from '../lib/topics';
 import { schemaPaths, validateOrThrow } from '../lib/schema';
 import { sendEvent } from '../lib/producer';
 import { createStateStore, type OrchestratorState } from '../lib/stateStore';
+import {
+   publishSchemasOnce,
+   startSchemaRegistryConsumer,
+} from '../lib/schemaRegistry';
 
 const kafka = createKafka('orchestrator-service');
 const producerPromise = createProducer(kafka);
@@ -114,6 +118,9 @@ await ensureTopics(kafka);
 
 const eventsConsumer = await consumerEventsPromise;
 const requestsConsumer = await consumerRequestsPromise;
+const producer = await producerPromise;
+await publishSchemasOnce(producer);
+await startSchemaRegistryConsumer(kafka, 'orchestrator-schema-registry');
 await eventsConsumer.subscribe({
    topic: topics.conversationEvents,
    fromBeginning: true,

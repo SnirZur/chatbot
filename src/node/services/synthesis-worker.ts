@@ -12,6 +12,10 @@ import { topics } from '../lib/topics';
 import { schemaPaths, validateOrThrow } from '../lib/schema';
 import { sendEvent } from '../lib/producer';
 import { generateWithOpenAI } from '../lib/llm';
+import {
+   publishSchemasOnce,
+   startSchemaRegistryConsumer,
+} from '../lib/schemaRegistry';
 
 const kafka = createKafka('synthesis-worker');
 const producerPromise = createProducer(kafka);
@@ -26,6 +30,8 @@ await waitForKafka(kafka);
 await ensureTopics(kafka);
 
 const producer = await producerPromise;
+await publishSchemasOnce(producer);
+await startSchemaRegistryConsumer(kafka, 'synthesis-schema-registry');
 const consumer = await consumerPromise;
 
 await consumer.subscribe({

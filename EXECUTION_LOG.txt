@@ -19,3 +19,27 @@ Bot: כן. שאלת על מזג האוויר, שער דולר וחישוב 150 �
 
 /reset
 Bot: היסטוריית השיחה אופסה. נתחיל שיחה חדשה.
+
+Resilience Demos
+
+Worker Crash + Recovery (tool-worker)
+Command: docker compose stop tool-worker
+User: מה מזג האוויר בתל אביב?
+Bot: (timeout / no response)
+
+Command: docker compose start tool-worker
+User: מה מזג האוויר בתל אביב?
+Bot: 22 מעלות, מעונן חלקית.
+
+Orchestrator Crash + Recovery
+Command: docker compose stop orchestrator
+User: ליוסי יש 200 ש"ח ומוצר עולה 25 דולר — כמה יישאר לו אחרי ההמרה והקנייה?
+Bot: (timeout / no response)
+
+Command: docker compose start orchestrator
+User: ליוסי יש 200 ש"ח ומוצר עולה 25 דולר — כמה יישאר לו אחרי ההמרה והקנייה?
+Bot: ליוסי יישארו 106.25 ש"ח אחרי ההמרה והקנייה.
+
+Duplicate Invocation (Idempotency)
+Action: resend the same ToolInvocationRequested event (same invocationId).
+Result: tool-worker ignores duplicate invocationId, no duplicated ToolInvocationResulted event emitted.

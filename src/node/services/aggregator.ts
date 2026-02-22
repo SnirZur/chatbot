@@ -8,6 +8,10 @@ import {
 } from '../lib/kafka';
 import { topics } from '../lib/topics';
 import { schemaPaths, validateOrThrow } from '../lib/schema';
+import {
+   publishSchemasOnce,
+   startSchemaRegistryConsumer,
+} from '../lib/schemaRegistry';
 
 const kafka = createKafka('aggregator-service');
 const producerPromise = createProducer(kafka);
@@ -17,6 +21,8 @@ await waitForKafka(kafka);
 await ensureTopics(kafka);
 
 const producer = await producerPromise;
+await publishSchemasOnce(producer);
+await startSchemaRegistryConsumer(kafka, 'aggregator-schema-registry');
 const consumer = await consumerPromise;
 
 await consumer.subscribe({

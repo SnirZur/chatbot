@@ -12,6 +12,7 @@ KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092").split(",")
 TOPIC_REQUESTS = "tool-invocation-requests"
 TOPIC_EVENTS = "conversation-events"
 TOPIC_DLQ = "dead-letter-queue"
+TOPIC_SCHEMA_REGISTRY = "schema-registry"
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "products"
 DB_DIR = Path(__file__).resolve().parents[2] / "python-service" / "chroma_db"
@@ -25,12 +26,20 @@ consumer = KafkaConsumer(
     auto_offset_reset="earliest",
     enable_auto_commit=True,
 )
+schema_consumer = KafkaConsumer(
+    TOPIC_SCHEMA_REGISTRY,
+    bootstrap_servers=KAFKA_BROKERS,
+    group_id="rag-retriever-schema-registry",
+    auto_offset_reset="earliest",
+    enable_auto_commit=True,
+)
 
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 client = chromadb.PersistentClient(path=str(DB_DIR))
 collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
 processed = set()
+schema_registry = {}
 
 
 def read_text_files(directory: Path) -> List[Tuple[str, str]]:
@@ -86,6 +95,70 @@ def send_dlq(payload: Dict, error: str):
 
 ensure_indexed()
 
+def load_registry():
+    for message in schema_consumer:
+        try:
+            entry = json.loads(message.value.decode("utf-8"))
+            schema_path = entry.get("schemaPath")
+            schema = entry.get("schema")
+            if schema_path and schema:
+                schema_registry[schema_path] = schema
+        except Exception:
+            continue
+        if len(schema_registry) >= 1:
+            break
+
+
+load_registry()
+
+def validate_tool_invocation_command(command: Dict) -> bool:
+    if not isinstance(command, dict):
+        return False
+    if command.get("commandType") != "ToolInvocationRequested":
+        return False
+    if not isinstance(command.get("conversationId"), str):
+        return False
+    if not isinstance(command.get("userId"), str):
+        return False
+    if not isinstance(command.get("timestamp"), str):
+        return False
+    payload = command.get("payload", {})
+    if not isinstance(payload, dict):
+        return False
+    if not isinstance(payload.get("invocationId"), str):
+        return False
+    if not isinstance(payload.get("tool"), str):
+        return False
+    if not isinstance(payload.get("stepIndex"), (int, float)):
+        return False
+    return True
+
+
+def validate_tool_invocation_resulted_event(event: Dict) -> bool:
+    if not isinstance(event, dict):
+        return False
+    if event.get("eventType") != "ToolInvocationResulted":
+        return False
+    if not isinstance(event.get("conversationId"), str):
+        return False
+    if not isinstance(event.get("userId"), str):
+        return False
+    if not isinstance(event.get("timestamp"), str):
+        return False
+    payload = event.get("payload", {})
+    if not isinstance(payload, dict):
+        return False
+    if not isinstance(payload.get("invocationId"), str):
+        return False
+    if not isinstance(payload.get("tool"), str):
+        return False
+    if not isinstance(payload.get("stepIndex"), (int, float)):
+        return False
+    if "result" not in payload:
+        return False
+    return True
+
+
 for message in consumer:
     try:
         command = json.loads(message.value.decode("utf-8"))
@@ -93,9 +166,10 @@ for message in consumer:
         continue
 
     try:
-        payload = command.get("payload", {})
-        if command.get("commandType") != "ToolInvocationRequested":
+        if not validate_tool_invocation_command(command):
+            send_dlq(command, "Schema validation failed for commands/toolInvocationRequested.json")
             continue
+        payload = command.get("payload", {})
         if payload.get("tool") != "getProductInformation":
             continue
 
@@ -126,6 +200,9 @@ for message in consumer:
                 "result": result,
             },
         }
+        if not validate_tool_invocation_resulted_event(event):
+            send_dlq(event, "Schema validation failed for events/toolInvocationResulted.json")
+            continue
         send_event(event)
     except Exception as exc:
         send_dlq(command, str(exc))
