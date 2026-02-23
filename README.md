@@ -56,31 +56,43 @@ Router features:
 - Use `/reset` to clear the saved history.
 - Review-only prompts run quick sentiment + analysis unless a product spec is requested, in which case the router handles it.
 
+Folder structure (key parts):
+- `packages/server` — TypeScript orchestration server
+- `packages/client` — React UI
+- `python-service` — RAG indexing + retrieval API
+- `data/products` — KB text files
+- `execution-log.md` — proof logs
+
+Python dependencies:
+- `python-service/requirements.txt`
 
 
 
-operation                      | module       | duration (ms) | precisement
-
-Router                         | ollama       | 9050          | 5
-Router Fallback                | OpenAi       | 2869          | 5
-General chat                   | ollama       | 18889         | 5
-Review sentiment               | Hugging face | 1106          | 5
-Review Analysis                | OpenAi       | 2783          | 5
-RAG retrival                   | Hugging face | 616           | 5
-RAG Generation                 | OpenAi       | 4368          | 5
-Orchestration Synthesis        | OpenAi       | 1193          | 5
+| Operation | Module | Duration (ms) | Precision (1-5) |
+|---|---|---:|---:|
+| Router | Ollama | 9050 | 5 |
+| Router Fallback | OpenAI | 2869 | 5 |
+| General Chat | Ollama | 18889 | 5 |
+| Review Sentiment | Hugging Face | 1106 | 5 |
+| Review Analysis | OpenAI | 2783 | 5 |
+| RAG Retrieval | Hugging Face | 616 | 5 |
+| RAG Generation | OpenAI | 4368 | 5 |
+| Orchestration Synthesis | OpenAI | 1193 | 5 |
 
 Real demo timings (from latest `execution-log.md`)
 
-operation                      | module       | duration (ms) | precisement
+| Operation | Module | Duration (ms) | Precision (1-5) |
+|---|---|---:|---:|
+| Router (math) | OpenAI | 1202 | 5 |
+| Router (weather+fx) | OpenAI | 1206 | 5 |
+| Synthesis (weather+fx) | OpenAI | 2497 | 5 |
+| RAG Retrieval (EvoPhone X) | Python/Chroma | 318 | 5 |
+| RAG Generation (EvoPhone X) | OpenAI | 1245 | 5 |
+| RAG Retrieval (PrintForge) | Python/Chroma | 115 | 5 |
+| RAG Generation (PrintForge) | OpenAI | 4700 | 5 |
 
-Router (math)                  | OpenAi       | 1202          | 5
-Router (weather+fx)            | OpenAi       | 1206          | 5
-Synthesis (weather+fx)         | OpenAi       | 2497          | 5
-RAG retrieval (EvoPhone X)     | Python/Chroma| 318           | 5
-RAG generation (EvoPhone X)    | OpenAi       | 1245          | 5
-RAG retrieval (PrintForge)     | Python/Chroma| 115           | 5
-RAG generation (PrintForge)    | OpenAi       | 4700          | 5
+Model comparison note:
+- Router prefers local Ollama for speed/cost; OpenAI is fallback for strict JSON reliability.
 
 
 ---
