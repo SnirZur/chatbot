@@ -68,17 +68,6 @@ Python dependencies:
 
 
 
-| Operation | Module | Duration (ms) | Precision (1-5) |
-|---|---|---:|---:|
-| Router | Ollama | 9050 | 5 |
-| Router Fallback | OpenAI | 2869 | 5 |
-| General Chat | Ollama | 18889 | 5 |
-| Review Sentiment | Hugging Face | 1106 | 5 |
-| Review Analysis | OpenAI | 2783 | 5 |
-| RAG Retrieval | Hugging Face | 616 | 5 |
-| RAG Generation | OpenAI | 4368 | 5 |
-| Orchestration Synthesis | OpenAI | 1193 | 5 |
-
 Real demo timings (from latest `execution-log.md`)
 
 | Operation | Module | Duration (ms) | Precision (1-5) |
