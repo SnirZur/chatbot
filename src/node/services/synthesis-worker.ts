@@ -35,7 +35,7 @@ await startSchemaRegistryConsumer(kafka, 'synthesis-schema-registry');
 const consumer = await consumerPromise;
 
 await consumer.subscribe({
-   topic: topics.synthesisRequests,
+   topic: topics.userCommands,
    fromBeginning: true,
 });
 
@@ -44,6 +44,9 @@ await runConsumerWithRestart(
    async ({ message }) => {
       if (!message.value) return;
       const command = JSON.parse(message.value.toString());
+      if (command?.commandType !== 'SynthesizeFinalAnswerRequested') {
+         return;
+      }
       try {
          validateOrThrow(schemaPaths.synthesizeFinalAnswerRequested, command);
       } catch (error) {

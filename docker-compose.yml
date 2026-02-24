@@ -61,13 +61,37 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
 
-  tool-worker:
+  math-worker:
     image: oven/bun:1.1.29
     working_dir: /app
     volumes:
       - ./:/app
     entrypoint: ["bun"]
-    command: ["src/node/services/tool-worker.ts"]
+    command: ["src/node/services/math-worker.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  exchange-rate-worker:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/exchange-rate-worker.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  weather-worker:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/weather-worker.ts"]
     depends_on:
       - kafka
     environment:
@@ -139,31 +163,16 @@ services:
       KAFKA_BROKERS: kafka:9092
 
   rag-retriever-worker:
-    image: python:3.11-slim
+    build:
+      context: .
+      dockerfile: Dockerfile.rag
     working_dir: /app
     volumes:
       - ./:/app
-    command: sh -c "pip install -r src/python/requirements.txt && python src/python/rag_retriever_worker.py"
     depends_on:
       - kafka
       - chromadb
     environment:
       KAFKA_BROKERS: kafka:9092
 
-  web-gateway:
-    image: oven/bun:1.1.29
-    working_dir: /app/packages/server
-    volumes:
-      - ./:/app
-    command: sh -c "bun --no-install run index.ts"
-    depends_on:
-      - kafka
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      HUSKY: "0"
-      ENABLE_REVIEWS: "false"
-    ports:
-      - "3000:3000"
-
-  # client is run locally (not in docker)
+  # web-gateway and client are run locally (not in docker)

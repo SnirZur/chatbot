@@ -38,7 +38,23 @@ model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 client = chromadb.PersistentClient(path=str(DB_DIR))
 collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
+processed_file = DB_DIR / "processed_invocations.txt"
 processed = set()
+
+
+def load_processed():
+    if not processed_file.exists():
+        return
+    for line in processed_file.read_text(encoding="utf-8").splitlines():
+        if line:
+            processed.add(line.strip())
+
+
+def mark_processed(invocation_id: str):
+    processed.add(invocation_id)
+    processed_file.parent.mkdir(parents=True, exist_ok=True)
+    with processed_file.open("a", encoding="utf-8") as file:
+        file.write(invocation_id + "\n")
 schema_registry = {}
 
 
@@ -94,6 +110,7 @@ def send_dlq(payload: Dict, error: str):
 
 
 ensure_indexed()
+load_processed()
 
 def load_registry():
     for message in schema_consumer:
@@ -176,7 +193,6 @@ for message in consumer:
         invocation_id = payload.get("invocationId")
         if invocation_id in processed:
             continue
-        processed.add(invocation_id)
 
         query = str(payload.get("parameters", {}).get("query", ""))
         if not query:
@@ -204,5 +220,7 @@ for message in consumer:
             send_dlq(event, "Schema validation failed for events/toolInvocationResulted.json")
             continue
         send_event(event)
+        if isinstance(invocation_id, str):
+            mark_processed(invocation_id)
     except Exception as exc:
         send_dlq(command, str(exc))

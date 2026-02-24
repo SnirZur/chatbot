@@ -16,6 +16,11 @@ import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
+import {
+   createIdempotencyStore,
+   hasBeenProcessed,
+   markProcessed,
+} from '../lib/idempotencyStore';
 
 const kafka = createKafka('llm-inference-worker');
 const producerPromise = createProducer(kafka);
@@ -33,6 +38,10 @@ const analyzeReviewPrompt = fs.readFileSync(
    path.resolve('prompts/analyze-review.txt'),
    'utf-8'
 );
+const orchestrationSynthesisPrompt = fs.readFileSync(
+   path.resolve('prompts/orchestration-synthesis.txt'),
+   'utf-8'
+);
 
 await waitForKafka(kafka);
 await ensureTopics(kafka);
@@ -47,7 +56,9 @@ await consumer.subscribe({
    fromBeginning: true,
 });
 
-const processed = new Set<string>();
+const idempotencyStore = createIdempotencyStore(
+   '.state/idempotency/llm-inference-worker'
+);
 
 await runConsumerWithRestart(
    consumer,
@@ -82,8 +93,9 @@ await runConsumerWithRestart(
          };
       };
 
-      if (processed.has(payload.invocationId)) return;
-      processed.add(payload.invocationId);
+      if (await hasBeenProcessed(idempotencyStore, payload.invocationId)) {
+         return;
+      }
 
       let result: unknown;
 
@@ -118,6 +130,21 @@ await runConsumerWithRestart(
                temperature: 0.2,
             }),
          };
+      } else if (payload.tool === 'orchestrationSynthesis') {
+         const synthesisPayload = JSON.stringify(
+            payload.parameters ?? {},
+            null,
+            2
+         );
+         result = {
+            text: await generateWithOpenAI({
+               model: 'gpt-3.5-turbo',
+               instructions: orchestrationSynthesisPrompt,
+               prompt: synthesisPayload,
+               maxTokens: 200,
+               temperature: 0.2,
+            }),
+         };
       } else {
          return;
       }
@@ -139,6 +166,7 @@ await runConsumerWithRestart(
             },
          }
       );
+      await markProcessed(idempotencyStore, payload.invocationId);
    },
    'llm-inference-worker'
 );

@@ -13,6 +13,9 @@ Rules:
 - Tools must be one of: getWeather, calculateMath, getExchangeRate, generalChat, getProductInformation, analyzeReview, ragGeneration.
 - The plan must be an ordered list of steps.
 - Use placeholders to pass results: <result_from_tool_1>, <result_from_tool_2>, etc.
+- If the user asks about a specific product (e.g., PrintForge Mini, BrewMaster 360, EvoPhone X, Voltrider E2), you MUST include:
+  1) getProductInformation with a query for that product, and
+  2) ragGeneration that uses the product info result via a placeholder.
 - If the answer needs combining tool results or multi-step reasoning, set final_answer_synthesis_required to true.
 - If no tool is needed, output plan: [] and final_answer_synthesis_required: false.
 - Keep parameters minimal and specific.

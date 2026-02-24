@@ -1,4 +1,3 @@
-import path from 'node:path';
 import {
    createKafka,
    createProducer,
@@ -17,40 +16,10 @@ import {
 const kafka = createKafka('history-projection');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'history-projection-group');
-
-const historyFilePath = path.resolve('history.json');
 const historyMap = new Map<
    string,
    Array<{ role: 'user' | 'assistant'; content: string }>
 >();
-
-const loadHistory = async () => {
-   const file = Bun.file(historyFilePath);
-   if (!(await file.exists())) return;
-   const data = await file.text();
-   const parsed = JSON.parse(data) as Record<
-      string,
-      Array<{ role: 'user' | 'assistant'; content: string }>
-   >;
-   if (parsed && typeof parsed === 'object') {
-      for (const [userId, history] of Object.entries(parsed)) {
-         if (Array.isArray(history)) historyMap.set(userId, history);
-      }
-   }
-};
-
-const saveHistory = async () => {
-   const obj: Record<
-      string,
-      Array<{ role: 'user' | 'assistant'; content: string }>
-   > = {};
-   for (const [userId, history] of historyMap.entries()) {
-      obj[userId] = history;
-   }
-   await Bun.write(historyFilePath, JSON.stringify(obj, null, 2));
-};
-
-await loadHistory();
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -90,7 +59,6 @@ await runConsumerWithRestart(
          const history = historyMap.get(event.userId) ?? [];
          history.push({ role: 'user', content: event.payload.userInput });
          historyMap.set(event.userId, history);
-         await saveHistory();
          return;
       }
 
@@ -114,7 +82,6 @@ await runConsumerWithRestart(
          const history = historyMap.get(event.userId) ?? [];
          history.push({ role: 'assistant', content: event.payload.message });
          historyMap.set(event.userId, history);
-         await saveHistory();
          return;
       }
 
@@ -136,7 +103,6 @@ await runConsumerWithRestart(
             return;
          }
          historyMap.delete(event.userId);
-         await saveHistory();
          return;
       }
    },

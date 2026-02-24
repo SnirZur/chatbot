@@ -48,6 +48,113 @@ const sendToDlq = async (payload: unknown, error: string) => {
    });
 };
 
+const productPatterns = [
+   { name: 'PrintForge Mini', pattern: /printforge\s*-?\s*mini/i },
+   { name: 'BrewMaster 360', pattern: /brewmaster\s*-?\s*360/i },
+   { name: 'EvoPhone X', pattern: /evophone\s*-?\s*x/i },
+   { name: 'Voltrider E2', pattern: /voltrider\s*-?\s*e2/i },
+];
+
+const detectProductName = (input: string) => {
+   for (const entry of productPatterns) {
+      if (entry.pattern.test(input)) return entry.name;
+   }
+   return null;
+};
+
+const ensureRagSteps = (
+   planJson: {
+      plan: Array<{ tool: string; parameters: Record<string, unknown> }>;
+      final_answer_synthesis_required: boolean;
+   },
+   userInput: string,
+   productName: string
+) => {
+   const plan = planJson.plan;
+   const hasTool = (tool: string) => plan.some((step) => step.tool === tool);
+   let productStepIndex = plan.findIndex(
+      (step) => step.tool === 'getProductInformation'
+   );
+
+   if (productStepIndex === -1) {
+      plan.push({
+         tool: 'getProductInformation',
+         parameters: { query: productName },
+      });
+      productStepIndex = plan.length - 1;
+   }
+
+   const ragStepIndex = plan.findIndex((step) => step.tool === 'ragGeneration');
+   const ragPayload = `User question: ${userInput}\nKnowledge: <result_from_tool_${productStepIndex + 1}>`;
+   if (ragStepIndex === -1) {
+      plan.push({
+         tool: 'ragGeneration',
+         parameters: { ragPayload },
+      });
+   } else {
+      plan[ragStepIndex].parameters = {
+         ...plan[ragStepIndex].parameters,
+         ragPayload,
+      };
+   }
+
+   planJson.final_answer_synthesis_required = true;
+};
+
+const extractAmount = (input: string, pattern: RegExp) => {
+   const match = input.match(pattern);
+   if (!match) return null;
+   const value = Number(match[1]);
+   return Number.isFinite(value) ? value : null;
+};
+
+const ensureExchangeAndMath = (
+   planJson: {
+      plan: Array<{ tool: string; parameters: Record<string, unknown> }>;
+      final_answer_synthesis_required: boolean;
+   },
+   userInput: string
+) => {
+   const shekel = extractAmount(
+      userInput,
+      /(\d+(?:\.\d+)?)\s*(?:ש״ח|ש\"ח|שח|₪)/i
+   );
+   const usd = extractAmount(userInput, /(\d+(?:\.\d+)?)\s*(?:דולר|usd|\$)/i);
+   if (shekel === null || usd === null) return;
+
+   const plan = planJson.plan;
+   let exchangeIndex = plan.findIndex(
+      (step) => step.tool === 'getExchangeRate'
+   );
+   let mathIndex = plan.findIndex((step) => step.tool === 'calculateMath');
+
+   if (exchangeIndex === -1) {
+      const insertAt = mathIndex === -1 ? plan.length : mathIndex;
+      plan.splice(insertAt, 0, {
+         tool: 'getExchangeRate',
+         parameters: { from: 'USD', to: 'ILS' },
+      });
+      exchangeIndex = insertAt;
+      if (mathIndex !== -1) mathIndex += 1;
+   }
+
+   const expression = `${shekel} - (${usd} * <result_from_tool_${exchangeIndex + 1}>)`;
+
+   if (mathIndex === -1) {
+      plan.push({
+         tool: 'calculateMath',
+         parameters: { expression },
+      });
+   } else {
+      plan[mathIndex].parameters = {
+         ...plan[mathIndex].parameters,
+         expression,
+      };
+   }
+
+   planJson.final_answer_synthesis_required = true;
+};
+
 const processed = new Set<string>();
 
 await waitForKafka(kafka);
@@ -72,6 +179,9 @@ await runConsumerWithRestart(
             const key = `${commandType ?? 'unknown'}:${incomingConversationId}`;
             if (processed.has(key)) return;
             processed.add(key);
+         }
+         if (commandType === 'SynthesizeFinalAnswerRequested') {
+            return;
          }
          if (commandType === 'UserControl') {
             try {
@@ -143,9 +253,36 @@ await runConsumerWithRestart(
                temperature: 0,
             });
             planJson = parsePlan(fallbackText);
+            if (!isValidPlan(planJson)) {
+               throw new Error('Invalid plan from OpenAI fallback');
+            }
          }
 
          try {
+            const productName = detectProductName(payload.userInput);
+            if (productName) {
+               ensureRagSteps(
+                  planJson as {
+                     plan: Array<{
+                        tool: string;
+                        parameters: Record<string, unknown>;
+                     }>;
+                     final_answer_synthesis_required: boolean;
+                  },
+                  payload.userInput,
+                  productName
+               );
+            }
+            ensureExchangeAndMath(
+               planJson as {
+                  plan: Array<{
+                     tool: string;
+                     parameters: Record<string, unknown>;
+                  }>;
+                  final_answer_synthesis_required: boolean;
+               },
+               payload.userInput
+            );
             await sendEvent(
                producer,
                schemaPaths.planGenerated,

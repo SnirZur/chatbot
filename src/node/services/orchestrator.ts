@@ -14,6 +14,11 @@ import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
+import {
+   createIdempotencyStore,
+   hasBeenProcessed,
+   markProcessed,
+} from '../lib/idempotencyStore';
 
 const kafka = createKafka('orchestrator-service');
 const producerPromise = createProducer(kafka);
@@ -27,6 +32,9 @@ const consumerRequestsPromise = createConsumer(
 );
 
 const store = createStateStore('.state/orchestrator');
+const requestIdempotencyStore = createIdempotencyStore(
+   '.state/idempotency/orchestrator-requests'
+);
 
 const resolvePlaceholders = (
    params: Record<string, unknown>,
@@ -139,6 +147,39 @@ const recoverRunningPlans = async () => {
 };
 
 await recoverRunningPlans();
+
+await runConsumerWithRestart(
+   requestsConsumer,
+   async ({ message }) => {
+      if (!message.value) return;
+      const command = JSON.parse(message.value.toString());
+      try {
+         validateOrThrow(schemaPaths.toolInvocationRequested, command);
+      } catch (error) {
+         const producer = await producerPromise;
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: (error as Error).message,
+                     payload: command,
+                  }),
+               },
+            ],
+         });
+         return;
+      }
+      const invocationId = command?.payload?.invocationId;
+      if (typeof invocationId === 'string') {
+         if (await hasBeenProcessed(requestIdempotencyStore, invocationId)) {
+            return;
+         }
+         await markProcessed(requestIdempotencyStore, invocationId);
+      }
+   },
+   'orchestrator-requests'
+);
 
 await runConsumerWithRestart(
    eventsConsumer,
@@ -264,12 +305,4 @@ await runConsumerWithRestart(
       }
    },
    'orchestrator-events'
-);
-
-await runConsumerWithRestart(
-   requestsConsumer,
-   async () => {
-      // intentionally empty: this consumer keeps the group active to avoid duplicate invocations
-   },
-   'orchestrator-requests'
 );

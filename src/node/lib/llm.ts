@@ -19,14 +19,17 @@ export const generateWithOpenAI = async ({
    maxTokens?: number;
    temperature?: number;
 }) => {
-   const response = await openAIClient.responses.create({
+   const safePrompt = prompt && prompt.trim().length > 0 ? prompt : ' ';
+   const response = await openAIClient.chat.completions.create({
       model,
-      input: prompt,
-      instructions,
+      messages: [
+         ...(instructions ? [{ role: 'system', content: instructions }] : []),
+         { role: 'user', content: safePrompt },
+      ],
       temperature,
-      max_output_tokens: maxTokens,
+      max_tokens: maxTokens,
    });
-   return response.output_text;
+   return response.choices[0]?.message?.content ?? '';
 };
 
 export const chatWithOllama = async ({
