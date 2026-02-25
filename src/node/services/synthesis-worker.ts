@@ -41,7 +41,7 @@ await startSchemaRegistryConsumer(kafka, 'synthesis-schema-registry');
 const consumer = await consumerPromise;
 
 await consumer.subscribe({
-   topic: topics.userCommands,
+   topic: topics.finalSynthesisRequests,
    fromBeginning: true,
 });
 

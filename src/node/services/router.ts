@@ -271,10 +271,6 @@ await runConsumerWithRestart(
          if (dedupeKey) {
             if (await hasBeenProcessed(idempotencyStore, dedupeKey)) return;
          }
-         if (commandType === 'SynthesizeFinalAnswerRequested') {
-            if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
-            return;
-         }
          if (commandType === 'UserControl') {
             try {
                validateOrThrow(schemaPaths.userControl, command);

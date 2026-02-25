@@ -158,7 +158,7 @@ await runConsumerWithRestart(
          }
 
          await producer.send({
-            topic: topics.userCommands,
+            topic: topics.finalSynthesisRequests,
             messages: [
                {
                   key: eventRecord.conversationId,

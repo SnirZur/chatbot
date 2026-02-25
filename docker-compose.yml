@@ -162,6 +162,20 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
 
+  user-interface:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/user-interface.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    stdin_open: true
+    tty: true
+
   rag-retriever-worker:
     build:
       context: .

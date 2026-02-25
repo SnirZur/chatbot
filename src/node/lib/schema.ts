@@ -60,6 +60,7 @@ export const schemaPaths = {
 export const topicSchemaMap = {
    [topics.userCommands]: null,
    [topics.toolInvocationRequests]: schemaPaths.toolInvocationRequested,
+   [topics.finalSynthesisRequests]: schemaPaths.synthesizeFinalAnswerRequested,
    [topics.conversationEvents]: null,
    [topics.deadLetterQueue]: null,
 } as const;
