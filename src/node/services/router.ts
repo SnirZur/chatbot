@@ -16,10 +16,16 @@ import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
+import {
+   createIdempotencyStore,
+   hasBeenProcessed,
+   markProcessed,
+} from '../lib/idempotencyStore';
 
 const kafka = createKafka('router-service');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'router-service-group');
+const idempotencyStore = createIdempotencyStore('.state/idempotency/router');
 
 const routerPrompt = fs.readFileSync(
    path.resolve('prompts/router.txt'),
@@ -32,12 +38,107 @@ const parsePlan = (text: string) => {
    return JSON.parse(candidate);
 };
 
-const isValidPlan = (value: unknown) => {
-   if (!value || typeof value !== 'object') return false;
-   const plan = (value as { plan?: unknown }).plan;
-   const synth = (value as { final_answer_synthesis_required?: unknown })
-      .final_answer_synthesis_required;
-   return Array.isArray(plan) && typeof synth === 'boolean';
+type ToolName =
+   | 'calculateMath'
+   | 'getExchangeRate'
+   | 'getWeather'
+   | 'generalChat'
+   | 'ragGeneration'
+   | 'analyzeReview'
+   | 'orchestrationSynthesis'
+   | 'getProductInformation';
+
+type PlanStep = { tool: ToolName; parameters: Record<string, unknown> };
+type PlanPayload = {
+   plan: PlanStep[];
+   final_answer_synthesis_required: boolean;
+};
+
+const getObject = (value: unknown): Record<string, unknown> | null =>
+   value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+
+const asString = (value: unknown) =>
+   typeof value === 'string' ? value.trim() : '';
+
+const normalizePlanPayload = (
+   value: unknown,
+   userInput: string
+): PlanPayload => {
+   const root = getObject(value);
+   if (!root) throw new Error('Plan root must be an object');
+   const planRaw = root.plan;
+   if (!Array.isArray(planRaw)) throw new Error('Plan must contain an array');
+   const synth = root.final_answer_synthesis_required;
+   if (typeof synth !== 'boolean') {
+      throw new Error('Plan must include final_answer_synthesis_required');
+   }
+
+   const normalizedPlan: PlanStep[] = [];
+   for (const rawStep of planRaw) {
+      const normalizedStep = (() => {
+         const step = getObject(rawStep);
+         if (!step) return null;
+         const tool = asString(step.tool) as ToolName;
+         const parameters = getObject(step.parameters) ?? {};
+
+         switch (tool) {
+            case 'calculateMath': {
+               const expression = asString(parameters.expression);
+               return expression ? { tool, parameters: { expression } } : null;
+            }
+            case 'getExchangeRate': {
+               const from = asString(parameters.from) || 'USD';
+               const to = asString(parameters.to) || 'ILS';
+               return { tool, parameters: { from, to } };
+            }
+            case 'getWeather': {
+               const city = asString(parameters.city);
+               return city ? { tool, parameters: { city } } : null;
+            }
+            case 'generalChat': {
+               const message = asString(parameters.message) || userInput;
+               return message ? { tool, parameters: { message } } : null;
+            }
+            case 'ragGeneration': {
+               const ragPayload = asString(parameters.ragPayload);
+               return ragPayload ? { tool, parameters: { ragPayload } } : null;
+            }
+            case 'analyzeReview': {
+               const reviewText = asString(parameters.review_text);
+               return reviewText
+                  ? { tool, parameters: { review_text: reviewText } }
+                  : null;
+            }
+            case 'orchestrationSynthesis': {
+               return Object.keys(parameters).length > 0
+                  ? { tool, parameters }
+                  : null;
+            }
+            case 'getProductInformation': {
+               const query =
+                  asString(parameters.query) ||
+                  asString(parameters.product_name);
+               return query
+                  ? { tool, parameters: { ...parameters, query } }
+                  : null;
+            }
+            default:
+               return null;
+         }
+      })();
+      if (normalizedStep) normalizedPlan.push(normalizedStep);
+   }
+
+   if (normalizedPlan.length === 0) {
+      throw new Error('Plan has no valid executable steps');
+   }
+
+   return {
+      plan: normalizedPlan,
+      final_answer_synthesis_required: synth,
+   };
 };
 
 const sendToDlq = async (payload: unknown, error: string) => {
@@ -63,10 +164,7 @@ const detectProductName = (input: string) => {
 };
 
 const ensureRagSteps = (
-   planJson: {
-      plan: Array<{ tool: string; parameters: Record<string, unknown> }>;
-      final_answer_synthesis_required: boolean;
-   },
+   planJson: PlanPayload,
    userInput: string,
    productName: string
 ) => {
@@ -108,13 +206,7 @@ const extractAmount = (input: string, pattern: RegExp) => {
    return Number.isFinite(value) ? value : null;
 };
 
-const ensureExchangeAndMath = (
-   planJson: {
-      plan: Array<{ tool: string; parameters: Record<string, unknown> }>;
-      final_answer_synthesis_required: boolean;
-   },
-   userInput: string
-) => {
+const ensureExchangeAndMath = (planJson: PlanPayload, userInput: string) => {
    const shekel = extractAmount(
       userInput,
       /(\d+(?:\.\d+)?)\s*(?:ש״ח|ש\"ח|שח|₪)/i
@@ -155,8 +247,6 @@ const ensureExchangeAndMath = (
    planJson.final_answer_synthesis_required = true;
 };
 
-const processed = new Set<string>();
-
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -175,12 +265,14 @@ await runConsumerWithRestart(
          const command = JSON.parse(message.value.toString());
          const commandType = command.commandType as string | undefined;
          const incomingConversationId = String(command.conversationId ?? '');
-         if (incomingConversationId) {
-            const key = `${commandType ?? 'unknown'}:${incomingConversationId}`;
-            if (processed.has(key)) return;
-            processed.add(key);
+         const dedupeKey = incomingConversationId
+            ? `${commandType ?? 'unknown'}:${incomingConversationId}`
+            : null;
+         if (dedupeKey) {
+            if (await hasBeenProcessed(idempotencyStore, dedupeKey)) return;
          }
          if (commandType === 'SynthesizeFinalAnswerRequested') {
+            if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
             return;
          }
          if (commandType === 'UserControl') {
@@ -188,6 +280,7 @@ await runConsumerWithRestart(
                validateOrThrow(schemaPaths.userControl, command);
             } catch (error) {
                await sendToDlq(command, (error as Error).message);
+               if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
                return;
             }
             const { conversationId, userId, timestamp, payload } = command as {
@@ -208,6 +301,7 @@ await runConsumerWithRestart(
                   payload: { command: payload.command },
                }
             );
+            if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
             return;
          }
 
@@ -215,6 +309,7 @@ await runConsumerWithRestart(
             validateOrThrow(schemaPaths.userQueryReceived, command);
          } catch (error) {
             await sendToDlq(command, (error as Error).message);
+            if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
             return;
          }
 
@@ -233,17 +328,17 @@ await runConsumerWithRestart(
             payload: { userInput: payload.userInput },
          });
 
-         let planJson: unknown;
+         let planJson: PlanPayload;
          try {
             const ollamaText = await chatWithOllama({
                model: 'llama3',
                system: routerPrompt,
                user: payload.userInput,
             });
-            planJson = parsePlan(ollamaText);
-            if (!isValidPlan(planJson)) {
-               throw new Error('Invalid plan from ollama');
-            }
+            planJson = normalizePlanPayload(
+               parsePlan(ollamaText),
+               payload.userInput
+            );
          } catch {
             const fallbackText = await generateWithOpenAI({
                model: 'gpt-3.5-turbo',
@@ -252,37 +347,18 @@ await runConsumerWithRestart(
                maxTokens: 240,
                temperature: 0,
             });
-            planJson = parsePlan(fallbackText);
-            if (!isValidPlan(planJson)) {
-               throw new Error('Invalid plan from OpenAI fallback');
-            }
+            planJson = normalizePlanPayload(
+               parsePlan(fallbackText),
+               payload.userInput
+            );
          }
 
          try {
             const productName = detectProductName(payload.userInput);
             if (productName) {
-               ensureRagSteps(
-                  planJson as {
-                     plan: Array<{
-                        tool: string;
-                        parameters: Record<string, unknown>;
-                     }>;
-                     final_answer_synthesis_required: boolean;
-                  },
-                  payload.userInput,
-                  productName
-               );
+               ensureRagSteps(planJson, payload.userInput, productName);
             }
-            ensureExchangeAndMath(
-               planJson as {
-                  plan: Array<{
-                     tool: string;
-                     parameters: Record<string, unknown>;
-                  }>;
-                  final_answer_synthesis_required: boolean;
-               },
-               payload.userInput
-            );
+            ensureExchangeAndMath(planJson, payload.userInput);
             await sendEvent(
                producer,
                schemaPaths.planGenerated,
@@ -295,11 +371,17 @@ await runConsumerWithRestart(
                   payload: planJson,
                }
             );
+            if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
          } catch (error) {
             await sendToDlq(planJson, (error as Error).message);
+            if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
          }
       } catch (error) {
          console.error('router-service failed:', error);
+         await sendToDlq(
+            message.value ? message.value.toString() : null,
+            (error as Error).message
+         );
       }
    },
    'router-service'

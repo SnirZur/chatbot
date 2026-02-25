@@ -20,12 +20,15 @@ export const generateWithOpenAI = async ({
    temperature?: number;
 }) => {
    const safePrompt = prompt && prompt.trim().length > 0 ? prompt : ' ';
+   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      ...(instructions
+         ? [{ role: 'system' as const, content: instructions }]
+         : []),
+      { role: 'user' as const, content: safePrompt },
+   ];
    const response = await openAIClient.chat.completions.create({
       model,
-      messages: [
-         ...(instructions ? [{ role: 'system', content: instructions }] : []),
-         { role: 'user', content: safePrompt },
-      ],
+      messages,
       temperature,
       max_tokens: maxTokens,
    });

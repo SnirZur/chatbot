@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 from typing import Dict, List, Tuple
+from datetime import datetime, timezone
 
 import chromadb
 from kafka import KafkaConsumer, KafkaProducer
@@ -207,7 +208,7 @@ for message in consumer:
         event = {
             "conversationId": command.get("conversationId"),
             "userId": command.get("userId"),
-            "timestamp": "{}".format(message.timestamp),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "eventType": "ToolInvocationResulted",
             "payload": {
                 "invocationId": invocation_id,

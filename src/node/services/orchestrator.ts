@@ -152,7 +152,24 @@ await runConsumerWithRestart(
    requestsConsumer,
    async ({ message }) => {
       if (!message.value) return;
-      const command = JSON.parse(message.value.toString());
+      let command: unknown;
+      try {
+         command = JSON.parse(message.value.toString());
+      } catch (error) {
+         const producer = await producerPromise;
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: `Invalid JSON payload: ${(error as Error).message}`,
+                     payload: message.value.toString(),
+                  }),
+               },
+            ],
+         });
+         return;
+      }
       try {
          validateOrThrow(schemaPaths.toolInvocationRequested, command);
       } catch (error) {
@@ -170,7 +187,8 @@ await runConsumerWithRestart(
          });
          return;
       }
-      const invocationId = command?.payload?.invocationId;
+      const invocationId = (command as { payload?: { invocationId?: unknown } })
+         ?.payload?.invocationId;
       if (typeof invocationId === 'string') {
          if (await hasBeenProcessed(requestIdempotencyStore, invocationId)) {
             return;
@@ -185,12 +203,35 @@ await runConsumerWithRestart(
    eventsConsumer,
    async ({ message }) => {
       if (!message.value) return;
-      const event = JSON.parse(message.value.toString());
-      if (!event || !event.eventType) return;
+      let event: unknown;
+      try {
+         event = JSON.parse(message.value.toString());
+      } catch (error) {
+         const producer = await producerPromise;
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: `Invalid JSON payload: ${(error as Error).message}`,
+                     payload: message.value.toString(),
+                  }),
+               },
+            ],
+         });
+         return;
+      }
+      if (!(event && typeof event === 'object' && 'eventType' in event)) return;
+      const eventRecord = event as {
+         eventType: string;
+         conversationId: string;
+         userId: string;
+         payload: Record<string, unknown>;
+      };
 
       const producer = await producerPromise;
 
-      if (event.eventType === 'PlanGenerated') {
+      if (eventRecord.eventType === 'PlanGenerated') {
          try {
             validateOrThrow(schemaPaths.planGenerated, event);
          } catch (error) {
@@ -207,7 +248,7 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const { conversationId, userId, payload } = event;
+         const { conversationId, userId, payload } = eventRecord;
          const existing = await store.get(conversationId).catch(() => null);
          if (existing && existing.status !== 'FAILED') {
             return;
@@ -215,9 +256,13 @@ await runConsumerWithRestart(
          const state: OrchestratorState = {
             conversationId,
             userId,
-            plan: payload.plan ?? [],
-            final_answer_synthesis_required:
-               payload.final_answer_synthesis_required ?? false,
+            plan: (payload.plan ?? []) as Array<{
+               tool: string;
+               parameters: Record<string, unknown>;
+            }>,
+            final_answer_synthesis_required: Boolean(
+               payload.final_answer_synthesis_required
+            ),
             stepIndex: 0,
             results: [],
             status: 'RUNNING',
@@ -227,7 +272,7 @@ await runConsumerWithRestart(
          return;
       }
 
-      if (event.eventType === 'ToolInvocationResulted') {
+      if (eventRecord.eventType === 'ToolInvocationResulted') {
          try {
             validateOrThrow(schemaPaths.toolInvocationResulted, event);
          } catch (error) {
@@ -244,9 +289,11 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const { conversationId, payload } = event as {
-            conversationId: string;
-            payload: { stepIndex: number; tool: string; result: unknown };
+         const conversationId = eventRecord.conversationId;
+         const payload = eventRecord.payload as {
+            stepIndex: number;
+            tool: string;
+            result: unknown;
          };
          const state = await store.get(conversationId).catch(() => null);
          if (!state) return;
@@ -296,8 +343,8 @@ await runConsumerWithRestart(
          await sendToolInvocation(state, state.stepIndex);
       }
 
-      if (event.eventType === 'PlanFailed') {
-         const { conversationId } = event as { conversationId: string };
+      if (eventRecord.eventType === 'PlanFailed') {
+         const { conversationId } = eventRecord;
          const state = await store.get(conversationId).catch(() => null);
          if (!state) return;
          state.status = 'FAILED';

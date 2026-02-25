@@ -12,10 +12,12 @@ import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
+import { createAggregatorStateStore } from '../lib/aggregatorStateStore';
 
 const kafka = createKafka('aggregator-service');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'aggregator-service-group');
+const store = createAggregatorStateStore('.state/aggregator');
 
 await waitForKafka(kafka);
 await ensureTopics(kafka);
@@ -30,22 +32,55 @@ await consumer.subscribe({
    fromBeginning: true,
 });
 
-const toolResults = new Map<string, unknown[]>();
-const userInputs = new Map<string, string>();
+const getState = async (conversationId: string) => {
+   try {
+      return await store.get(conversationId);
+   } catch (error) {
+      if ((error as { notFound?: boolean }).notFound) {
+         return { userInput: '', toolResults: [], synthesisRequested: false };
+      }
+      throw error;
+   }
+};
 
 await runConsumerWithRestart(
    consumer,
    async ({ message }) => {
       if (!message.value) return;
-      const event = JSON.parse(message.value.toString());
-      if (!event || !event.eventType) return;
+      let event: unknown;
+      try {
+         event = JSON.parse(message.value.toString());
+      } catch (error) {
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: `Invalid JSON payload: ${(error as Error).message}`,
+                     payload: message.value.toString(),
+                  }),
+               },
+            ],
+         });
+         return;
+      }
+      if (!(event && typeof event === 'object' && 'eventType' in event)) return;
+      const eventRecord = event as {
+         eventType: string;
+         conversationId: string;
+         userId: string;
+         payload: Record<string, unknown>;
+      };
 
-      if (event.eventType === 'UserQueryReceived') {
-         userInputs.set(event.conversationId, event.payload.userInput ?? '');
+      if (eventRecord.eventType === 'UserQueryReceived') {
+         const state = await getState(eventRecord.conversationId);
+         state.userInput = String(eventRecord.payload.userInput ?? '');
+         state.synthesisRequested = false;
+         await store.put(eventRecord.conversationId, state);
          return;
       }
 
-      if (event.eventType === 'ToolInvocationResulted') {
+      if (eventRecord.eventType === 'ToolInvocationResulted') {
          try {
             validateOrThrow(schemaPaths.toolInvocationResulted, event);
          } catch (error) {
@@ -62,13 +97,14 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const results = toolResults.get(event.conversationId) ?? [];
-         results[event.payload.stepIndex] = event.payload.result;
-         toolResults.set(event.conversationId, results);
+         const state = await getState(eventRecord.conversationId);
+         const stepIndex = Number(eventRecord.payload.stepIndex);
+         state.toolResults[stepIndex] = eventRecord.payload.result;
+         await store.put(eventRecord.conversationId, state);
          return;
       }
 
-      if (event.eventType === 'PlanCompleted') {
+      if (eventRecord.eventType === 'PlanCompleted') {
          try {
             validateOrThrow(schemaPaths.planCompleted, event);
          } catch (error) {
@@ -85,15 +121,16 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const results = toolResults.get(event.conversationId) ?? [];
+         const state = await getState(eventRecord.conversationId);
+         if (state.synthesisRequested) return;
          const command = {
-            conversationId: event.conversationId,
-            userId: event.userId,
+            conversationId: eventRecord.conversationId,
+            userId: eventRecord.userId,
             timestamp: new Date().toISOString(),
             commandType: 'SynthesizeFinalAnswerRequested',
             payload: {
-               userInput: userInputs.get(event.conversationId) ?? '',
-               toolResults: results,
+               userInput: state.userInput,
+               toolResults: state.toolResults,
             },
          };
          try {
@@ -119,9 +156,14 @@ await runConsumerWithRestart(
          await producer.send({
             topic: topics.userCommands,
             messages: [
-               { key: event.conversationId, value: JSON.stringify(command) },
+               {
+                  key: eventRecord.conversationId,
+                  value: JSON.stringify(command),
+               },
             ],
          });
+         state.synthesisRequested = true;
+         await store.put(eventRecord.conversationId, state);
       }
    },
    'aggregator-service'
