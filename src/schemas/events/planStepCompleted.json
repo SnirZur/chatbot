@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["conversationId", "userId", "timestamp", "eventType", "payload"],
+  "properties": {
+    "conversationId": { "type": "string" },
+    "userId": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "eventType": { "const": "PlanStepCompleted" },
+    "payload": {
+      "type": "object",
+      "required": ["stepIndex", "tool"],
+      "properties": {
+        "stepIndex": { "type": "number" },
+        "tool": { "type": "string" }
+      }
+    }
+  }
+}

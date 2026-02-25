@@ -1,0 +1,21 @@
+BrewMaster 360 is a fictional countertop espresso and drip hybrid. It uses a 1.6L removable water tank, a 19-bar pump for espresso mode, and a stainless steel boiler with a 12-minute warm-up. A front dial switches between espresso, drip, and steam.
+
+For espresso, the recommended dose is 18-20 grams of medium-fine coffee with a 1:2 ratio. The machine ships with a single-wall portafilter basket and a pressurized basket for pre-ground coffee. Steam mode uses a manual wand with a rubber grip.
+
+Maintenance guidance: run a rinse cycle after each use. Descale every 6-8 weeks for hard water, using a citric-acid solution. Remove and clean the shower screen monthly. The drip filter should be replaced every 3 months or after 90 brews.
+
+Noise level is listed as 68 dB during pump operation. The drip carafe is 10 cups. Auto shutoff is set to 20 minutes. The machine includes a cup warmer plate and a programmable brew timer.
+
+Safety notes: do not run the pump without water, keep the steam wand clear of milk residue, and allow the boiler to cool for 10 minutes before descaling.
+
+The control panel includes a pressure gauge, a shot timer, and a backlit water-level indicator. Espresso temperature is factory set to 93°C and can be adjusted in a three-step range. A pre-infusion stage runs for 3 seconds to reduce channeling.
+
+The drip side supports a reusable metal filter basket as well as standard paper cones. Brew strength has three settings: light, balanced, and bold. The programmable timer allows scheduling up to 24 hours in advance.
+
+Steam performance: the wand reaches full pressure in about 25 seconds and maintains steady output for 60-90 seconds before a short recovery period. Milk foam is best with 150-200 ml volumes. The wand tip is removable for cleaning.
+
+Energy specs list 1450 W peak draw. The warm-up cycle can be shortened using the quick-heat mode, which reduces boiler stability slightly but saves about 3 minutes.
+
+Common troubleshooting: if shots run too fast, use a finer grind or increase dose; if too slow, coarsen the grind. For weak crema, check bean freshness and pre-heat the portafilter. For drip under-extraction, raise brew temperature by one step.
+
+Recommended water hardness is 50-120 ppm. A built-in reminder light prompts descaling after 60 cycles, and can be reset by holding the brew timer button for 5 seconds.

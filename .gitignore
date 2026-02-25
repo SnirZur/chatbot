@@ -1,5 +1,8 @@
 # dependencies (bun install)
 node_modules
+.venv/
+.state/
+python-service/chroma_db/
 
 # output
 out
@@ -32,6 +35,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# runtime history
+history.json
 
 # runtime history
 history.json

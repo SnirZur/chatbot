@@ -1,16 +1,3 @@
-import concurrently from 'concurrently';
-
-concurrently([
-   {
-      name: 'server',
-      command: 'bun run dev',
-      cwd: 'packages/server',
-      prefixColor: 'cyan',
-   },
-   {
-      name: 'client',
-      command: 'bun run dev',
-      cwd: 'packages/client',
-      prefixColor: 'green',
-   },
-]);
+console.warn(
+   'Legacy root index is deprecated. Use `bun run services` or `bun run services:ui`.'
+);

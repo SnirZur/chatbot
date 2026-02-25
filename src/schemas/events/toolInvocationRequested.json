@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["conversationId", "userId", "timestamp", "eventType", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "conversationId": { "type": "string" },
+    "userId": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "eventType": { "const": "ToolInvocationRequested" },
+    "payload": {
+      "type": "object",
+      "required": ["invocationId", "tool", "stepIndex"],
+      "additionalProperties": false,
+      "properties": {
+        "invocationId": { "type": "string" },
+        "tool": {
+          "type": "string",
+          "enum": [
+            "calculateMath",
+            "getExchangeRate",
+            "getWeather",
+            "generalChat",
+            "ragGeneration",
+            "analyzeReview",
+            "orchestrationSynthesis",
+            "getProductInformation"
+          ]
+        },
+        "stepIndex": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

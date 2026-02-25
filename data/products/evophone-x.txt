@@ -1,0 +1,21 @@
+EvoPhone X is a fictional flagship smartphone built around a 6.6-inch OLED display with a 120Hz refresh rate and 2400x1080 resolution. The device uses an AeroCore A9 chipset with 8 GB or 12 GB of RAM and storage options of 128 GB or 256 GB. The chassis is aluminum with GorillaGlass-like protection and an IP68 water resistance rating.
+
+Battery capacity is 4,800 mAh. Typical mixed-use battery life is listed as 24 hours, with video playback up to 18 hours. The device supports 45W wired fast charging and 15W wireless charging. A full wired charge is advertised at around 55 minutes with a compatible charger.
+
+The camera system includes a 50 MP main sensor with optical image stabilization, a 12 MP ultra-wide lens, and an 8 MP telephoto lens with 3x optical zoom. The front camera is 16 MP. The phone supports 4K video at 60 fps and a low-light mode called NightPulse.
+
+Connectivity includes 5G sub-6, Wi-Fi 6E, Bluetooth 5.3, and NFC. Dual-SIM is supported (one physical SIM plus one eSIM). The EvoPhone X runs OrionOS 5.1 with a promised three years of major updates.
+
+Common notes from the manual: keep the device between 0-35°C while charging, avoid using third-party high-watt chargers over 65W, and enable Battery Guard mode for long-term storage.
+
+Display tuning options include Natural, Vivid, and Cinema profiles, plus a nighttime reading mode that reduces blue light. The touch panel supports 240 Hz touch sampling for gaming. A GorillaGlass-like layer covers the display and the rear glass panel to improve scratch resistance.
+
+Audio features include stereo speakers with a spatial sound mode and three microphones for noise suppression during calls. The included USB-C earbuds support an inline microphone and volume controls. Hi-Res audio over Bluetooth is supported via AAC and LDAC.
+
+Biometric security options include an in-display fingerprint sensor and face unlock. The fingerprint sensor supports up to five enrolled fingerprints and has a quick unlock toggle that reduces lock-screen animations.
+
+The box contents list a USB-C cable, a 45W charger, a SIM eject tool, and a clear protective case. Optional accessories include a magnetic wallet, a 10,000 mAh power bank, and a ruggedized case rated for 2-meter drops.
+
+Diagnostic and care tips: run the built-in Storage Cleaner weekly, keep at least 10% free storage to avoid UI slowdowns, and update OrionOS before major app installs. If the phone overheats, disable 5G and reduce screen brightness for 10 minutes.
+
+Warranty coverage is 24 months for the handset and 6 months for the battery. Screen replacements are discounted once per year through the official service program. Water damage is not covered if seals are compromised.

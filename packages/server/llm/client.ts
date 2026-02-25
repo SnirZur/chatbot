@@ -9,7 +9,9 @@ const openAIClient = new OpenAI({
 
 const inferenceClient = new InferenceClient(process.env.HF_TOKEN);
 
-const ollamaClient = new Ollama();
+const ollamaClient = new Ollama({
+   host: process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
+});
 
 type GenerateTextOptions = {
    model?: string;

@@ -1,17 +1,193 @@
 services:
-  db:
-    image: mysql:8.4
-    container_name: ai_course_mysql
-    restart: unless-stopped
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: ai_course
-      MYSQL_USER: jennifer
-      MYSQL_PASSWORD: jennifer
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "3306:3306"
-    volumes:
-      - ai_course_mysql_data:/var/lib/mysql
+      - "2181:2181"
 
-volumes:
-  ai_course_mysql_data:
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+
+  router:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/router.ts"]
+    depends_on:
+      - kafka
+      - ollama
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OLLAMA_HOST: http://ollama:11434
+
+  orchestrator:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/orchestrator.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  math-worker:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/math-worker.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  exchange-rate-worker:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/exchange-rate-worker.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  weather-worker:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/weather-worker.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      WEATHER_API_KEY: ${WEATHER_API_KEY}
+
+  llm-inference-worker:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/llm-inference-worker.ts"]
+    depends_on:
+      - kafka
+      - ollama
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OLLAMA_HOST: http://ollama:11434
+
+  synthesis-worker:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/synthesis-worker.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+  aggregator:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/aggregator.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  history-projection:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/history-projection.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  metrics:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/services/metrics.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  user-interface:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+    entrypoint: ["bun"]
+    command: ["src/node/user-interface.ts"]
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKAJS_LOG_LEVEL: none
+    stdin_open: true
+    tty: true
+
+  rag-retriever-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.rag
+    working_dir: /app
+    volumes:
+      - ./:/app
+    depends_on:
+      - kafka
+      - chromadb
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  # web-gateway and client are run locally (not in docker)
