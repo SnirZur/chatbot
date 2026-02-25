@@ -140,7 +140,7 @@ const recoverRunningPlans = async () => {
 
 await recoverRunningPlans();
 
-await runConsumerWithRestart(
+const requestsLoop = runConsumerWithRestart(
    requestsConsumer,
    async ({ message }) => {
       if (!message.value) return;
@@ -185,7 +185,7 @@ await runConsumerWithRestart(
    'orchestrator-requests'
 );
 
-await runConsumerWithRestart(
+const eventsLoop = runConsumerWithRestart(
    eventsConsumer,
    async ({ message }) => {
       if (!message.value) return;
@@ -339,3 +339,5 @@ await runConsumerWithRestart(
    },
    'orchestrator-events'
 );
+
+await Promise.all([requestsLoop, eventsLoop]);

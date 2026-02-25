@@ -43,7 +43,7 @@ await consumer.subscribe({
    fromBeginning: false,
 });
 
-await runConsumerWithRestart(
+const consumerLoop = runConsumerWithRestart(
    consumer,
    async ({ message }) => {
       if (!message.value) return;
@@ -115,3 +115,6 @@ while (true) {
 }
 
 rl.close();
+await consumer.disconnect();
+await producer.disconnect();
+void consumerLoop;
