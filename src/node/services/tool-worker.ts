@@ -16,7 +16,6 @@ import {
 import {
    createIdempotencyStore,
    hasBeenProcessed,
-   markProcessed,
 } from '../lib/idempotencyStore';
 
 const kafka = createKafka('tool-worker');
@@ -165,7 +164,10 @@ const getWeather = async (city: string) => {
    url.searchParams.set('lang', 'he');
    const response = await fetch(url);
    if (!response.ok) throw new Error('Weather API request failed');
-   const data = await response.json();
+   const data = (await response.json()) as {
+      main?: { temp?: number };
+      weather?: Array<{ description?: string }>;
+   };
    const temp = Number(data?.main?.temp);
    const description = data?.weather?.[0]?.description;
    if (!Number.isFinite(temp) || typeof description !== 'string') {
@@ -224,46 +226,17 @@ await runConsumerWithRestart(
          return;
       }
 
-      try {
-         let result: unknown;
-         if (payload.tool === 'calculateMath') {
-            const expression = String(payload.parameters.expression ?? '');
-            const value = calculateMath(expression);
-            result = {
-               text: Number.isFinite(value)
-                  ? `התוצאה היא ${value}`
-                  : 'לא הצלחתי לחשב את הביטוי שביקשת.',
-               data: value,
-            };
-         } else if (payload.tool === 'getExchangeRate') {
-            const from = String(payload.parameters.from ?? '');
-            const to = String(payload.parameters.to ?? 'ILS');
-            result = getExchangeRate(from, to);
-         } else if (payload.tool === 'getWeather') {
-            const city = String(payload.parameters.city ?? '');
-            result = { text: await getWeather(city) };
-         } else {
-            return;
-         }
+      // Dedicated workers own these tools to avoid competing consumers.
+      if (
+         payload.tool === 'calculateMath' ||
+         payload.tool === 'getExchangeRate' ||
+         payload.tool === 'getWeather'
+      ) {
+         return;
+      }
 
-         await sendEvent(
-            producer,
-            schemaPaths.toolInvocationResulted,
-            conversationId,
-            {
-               conversationId,
-               userId,
-               timestamp: new Date().toISOString(),
-               eventType: 'ToolInvocationResulted',
-               payload: {
-                  invocationId: payload.invocationId,
-                  tool: payload.tool,
-                  stepIndex: payload.stepIndex,
-                  result,
-               },
-            }
-         );
-         await markProcessed(idempotencyStore, payload.invocationId);
+      try {
+         return;
       } catch (error) {
          await sendEvent(producer, schemaPaths.planFailed, conversationId, {
             conversationId,

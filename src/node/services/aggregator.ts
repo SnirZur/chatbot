@@ -122,6 +122,10 @@ await runConsumerWithRestart(
             return;
          }
          const state = await getState(eventRecord.conversationId);
+         const shouldSynthesize = Boolean(
+            eventRecord.payload.final_answer_synthesis_required
+         );
+         if (!shouldSynthesize) return;
          if (state.synthesisRequested) return;
          const command = {
             conversationId: eventRecord.conversationId,

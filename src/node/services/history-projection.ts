@@ -12,14 +12,22 @@ import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
+import { createHistoryStore } from '../lib/historyStore';
 
 const kafka = createKafka('history-projection');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'history-projection-group');
-const historyMap = new Map<
-   string,
-   Array<{ role: 'user' | 'assistant'; content: string }>
->();
+const historyStore = createHistoryStore('.state/history-projection');
+
+const getHistory = async (userId: string) => {
+   try {
+      const state = await historyStore.get(userId);
+      return state.messages;
+   } catch (error) {
+      if ((error as { notFound?: boolean }).notFound) return [];
+      throw error;
+   }
+};
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -56,9 +64,9 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const history = historyMap.get(event.userId) ?? [];
+         const history = await getHistory(event.userId);
          history.push({ role: 'user', content: event.payload.userInput });
-         historyMap.set(event.userId, history);
+         await historyStore.put(event.userId, { messages: history });
          return;
       }
 
@@ -79,9 +87,9 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const history = historyMap.get(event.userId) ?? [];
+         const history = await getHistory(event.userId);
          history.push({ role: 'assistant', content: event.payload.message });
-         historyMap.set(event.userId, history);
+         await historyStore.put(event.userId, { messages: history });
          return;
       }
 
@@ -102,7 +110,7 @@ await runConsumerWithRestart(
             });
             return;
          }
-         historyMap.delete(event.userId);
+         await historyStore.del(event.userId).catch(() => undefined);
          return;
       }
    },

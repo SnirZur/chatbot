@@ -14,11 +14,6 @@ import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
-import {
-   createIdempotencyStore,
-   hasBeenProcessed,
-   markProcessed,
-} from '../lib/idempotencyStore';
 
 const kafka = createKafka('orchestrator-service');
 const producerPromise = createProducer(kafka);
@@ -32,9 +27,6 @@ const consumerRequestsPromise = createConsumer(
 );
 
 const store = createStateStore('.state/orchestrator');
-const requestIdempotencyStore = createIdempotencyStore(
-   '.state/idempotency/orchestrator-requests'
-);
 
 const resolvePlaceholders = (
    params: Record<string, unknown>,
@@ -187,14 +179,8 @@ await runConsumerWithRestart(
          });
          return;
       }
-      const invocationId = (command as { payload?: { invocationId?: unknown } })
-         ?.payload?.invocationId;
-      if (typeof invocationId === 'string') {
-         if (await hasBeenProcessed(requestIdempotencyStore, invocationId)) {
-            return;
-         }
-         await markProcessed(requestIdempotencyStore, invocationId);
-      }
+      // Intentionally no state mutation here: orchestration state transitions
+      // are driven by immutable conversation events.
    },
    'orchestrator-requests'
 );

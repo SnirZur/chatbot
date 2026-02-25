@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "bun run index.ts",
-    "services": "concurrently \"bun src/node/services/router.ts\" \"bun src/node/services/orchestrator.ts\" \"bun src/node/services/tool-worker.ts\" \"bun src/node/services/llm-inference-worker.ts\" \"bun src/node/services/aggregator.ts\" \"bun src/node/services/synthesis-worker.ts\" \"bun src/node/services/history-projection.ts\"",
-    "services:cli": "concurrently \"bun src/node/services/router.ts\" \"bun src/node/services/orchestrator.ts\" \"bun src/node/services/tool-worker.ts\" \"bun src/node/services/llm-inference-worker.ts\" \"bun src/node/services/aggregator.ts\" \"bun src/node/services/synthesis-worker.ts\" \"bun src/node/services/history-projection.ts\"",
+    "services": "concurrently \"bun src/node/services/router.ts\" \"bun src/node/services/orchestrator.ts\" \"bun src/node/services/math-worker.ts\" \"bun src/node/services/exchange-rate-worker.ts\" \"bun src/node/services/weather-worker.ts\" \"bun src/node/services/llm-inference-worker.ts\" \"bun src/node/services/aggregator.ts\" \"bun src/node/services/synthesis-worker.ts\" \"bun src/node/services/history-projection.ts\"",
+    "services:cli": "concurrently \"bun src/node/services/router.ts\" \"bun src/node/services/orchestrator.ts\" \"bun src/node/services/math-worker.ts\" \"bun src/node/services/exchange-rate-worker.ts\" \"bun src/node/services/weather-worker.ts\" \"bun src/node/services/llm-inference-worker.ts\" \"bun src/node/services/aggregator.ts\" \"bun src/node/services/synthesis-worker.ts\" \"bun src/node/services/history-projection.ts\"",
     "full": "concurrently \"bun run services\" \"bun --cwd packages/server run dev\" \"bun --cwd packages/client run dev\"",
     "format": "prettier --write .",
     "prepare": "husky"
