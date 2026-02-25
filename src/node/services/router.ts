@@ -132,12 +132,17 @@ const normalizePlanPayload = (
    }
 
    if (normalizedPlan.length === 0) {
-      throw new Error('Plan has no valid executable steps');
+      // Safe fallback to keep pipeline alive when model output is malformed.
+      normalizedPlan.push({
+         tool: 'generalChat',
+         parameters: { message: userInput || 'שלום' },
+      });
    }
 
    return {
       plan: normalizedPlan,
-      final_answer_synthesis_required: synth,
+      // UI waits for FinalAnswerSynthesized, so keep synthesis enabled.
+      final_answer_synthesis_required: synth || true,
    };
 };
 
@@ -169,20 +174,29 @@ const ensureRagSteps = (
    productName: string
 ) => {
    const plan = planJson.plan;
-   const hasTool = (tool: string) => plan.some((step) => step.tool === tool);
    let productStepIndex = plan.findIndex(
       (step) => step.tool === 'getProductInformation'
    );
+   let ragStepIndex = plan.findIndex((step) => step.tool === 'ragGeneration');
 
    if (productStepIndex === -1) {
-      plan.push({
+      const insertAt = ragStepIndex === -1 ? plan.length : ragStepIndex;
+      plan.splice(insertAt, 0, {
          tool: 'getProductInformation',
          parameters: { query: productName },
       });
-      productStepIndex = plan.length - 1;
+      productStepIndex = insertAt;
+      if (ragStepIndex !== -1) ragStepIndex += 1;
    }
 
-   const ragStepIndex = plan.findIndex((step) => step.tool === 'ragGeneration');
+   // If product step exists after rag, move it before rag so placeholder is resolvable.
+   if (ragStepIndex !== -1 && productStepIndex > ragStepIndex) {
+      const [productStep] = plan.splice(productStepIndex, 1);
+      plan.splice(ragStepIndex, 0, productStep);
+      productStepIndex = ragStepIndex;
+      ragStepIndex += 1;
+   }
+
    const ragPayload = `User question: ${userInput}\nKnowledge: <result_from_tool_${productStepIndex + 1}>`;
    if (ragStepIndex === -1) {
       plan.push({

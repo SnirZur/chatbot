@@ -15,7 +15,10 @@ type BotResponse = { message: string };
 
 const kafka = createKafka('user-interface');
 const producerPromise = createProducer(kafka);
-const consumerPromise = createConsumer(kafka, 'user-interface-group');
+const consumerPromise = createConsumer(
+   kafka,
+   `user-interface-group-${randomUUID()}`
+);
 
 const userId = randomUUID();
 const pending = new Map<string, (response: BotResponse) => void>();

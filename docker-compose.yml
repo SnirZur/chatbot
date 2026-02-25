@@ -173,6 +173,7 @@ services:
       - kafka
     environment:
       KAFKA_BROKERS: kafka:9092
+      KAFKAJS_LOG_LEVEL: none
     stdin_open: true
     tty: true
 

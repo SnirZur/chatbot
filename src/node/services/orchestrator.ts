@@ -113,6 +113,33 @@ const sendToolInvocation = async (
    );
 };
 
+const failPlan = async (
+   conversationId: string,
+   userId: string,
+   reason: string,
+   payload?: unknown
+) => {
+   const producer = await producerPromise;
+   await producer.send({
+      topic: topics.deadLetterQueue,
+      messages: [
+         {
+            value: JSON.stringify({
+               error: reason,
+               payload,
+            }),
+         },
+      ],
+   });
+   await sendEvent(producer, schemaPaths.planFailed, conversationId, {
+      conversationId,
+      userId,
+      timestamp: new Date().toISOString(),
+      eventType: 'PlanFailed',
+      payload: { reason },
+   });
+};
+
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -254,7 +281,16 @@ const eventsLoop = runConsumerWithRestart(
             status: 'RUNNING',
          };
          await store.put(conversationId, state);
-         await sendToolInvocation(state, 0);
+         try {
+            await sendToolInvocation(state, 0);
+         } catch (error) {
+            await failPlan(
+               conversationId,
+               userId,
+               (error as Error).message,
+               state
+            );
+         }
          return;
       }
 
@@ -326,7 +362,16 @@ const eventsLoop = runConsumerWithRestart(
             return;
          }
 
-         await sendToolInvocation(state, state.stepIndex);
+         try {
+            await sendToolInvocation(state, state.stepIndex);
+         } catch (error) {
+            await failPlan(
+               conversationId,
+               state.userId,
+               (error as Error).message,
+               state
+            );
+         }
       }
 
       if (eventRecord.eventType === 'PlanFailed') {
