@@ -2,8 +2,8 @@ export const topics = {
    userCommands: 'user-commands',
    conversationEvents: 'conversation-events',
    toolInvocationRequests: 'tool-invocation-requests',
+   finalSynthesisRequests: 'final-synthesis-requests',
    deadLetterQueue: 'dead-letter-queue',
-   synthesisRequests: 'synthesis-requests',
    schemaRegistry: 'schema-registry',
 } as const;
 

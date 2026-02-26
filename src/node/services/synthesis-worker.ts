@@ -16,10 +16,16 @@ import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
+import {
+   createIdempotencyStore,
+   hasBeenProcessed,
+   markProcessed,
+} from '../lib/idempotencyStore';
 
 const kafka = createKafka('synthesis-worker');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'synthesis-worker-group');
+const idempotencyStore = createIdempotencyStore('.state/idempotency/synthesis');
 
 const synthesisPrompt = fs.readFileSync(
    path.resolve('prompts/orchestration-synthesis.txt'),
@@ -35,7 +41,7 @@ await startSchemaRegistryConsumer(kafka, 'synthesis-schema-registry');
 const consumer = await consumerPromise;
 
 await consumer.subscribe({
-   topic: topics.synthesisRequests,
+   topic: topics.finalSynthesisRequests,
    fromBeginning: true,
 });
 
@@ -43,7 +49,27 @@ await runConsumerWithRestart(
    consumer,
    async ({ message }) => {
       if (!message.value) return;
-      const command = JSON.parse(message.value.toString());
+      let command: unknown;
+      try {
+         command = JSON.parse(message.value.toString());
+      } catch (error) {
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: `Invalid JSON payload: ${(error as Error).message}`,
+                     payload: message.value.toString(),
+                  }),
+               },
+            ],
+         });
+         return;
+      }
+      const commandType = (command as { commandType?: string }).commandType;
+      if (commandType !== 'SynthesizeFinalAnswerRequested') {
+         return;
+      }
       try {
          validateOrThrow(schemaPaths.synthesizeFinalAnswerRequested, command);
       } catch (error) {
@@ -66,6 +92,9 @@ await runConsumerWithRestart(
          userId: string;
          payload: { userInput: string; toolResults: unknown[] };
       };
+      if (await hasBeenProcessed(idempotencyStore, conversationId)) {
+         return;
+      }
 
       const synthesisPayload = JSON.stringify(
          {
@@ -76,26 +105,41 @@ await runConsumerWithRestart(
          2
       );
 
-      const text = await generateWithOpenAI({
-         model: 'gpt-3.5-turbo',
-         instructions: synthesisPrompt,
-         prompt: synthesisPayload,
-         maxTokens: 200,
-         temperature: 0.2,
-      });
+      try {
+         const text = await generateWithOpenAI({
+            model: 'gpt-3.5-turbo',
+            instructions: synthesisPrompt,
+            prompt: synthesisPayload,
+            maxTokens: 200,
+            temperature: 0.2,
+         });
 
-      await sendEvent(
-         producer,
-         schemaPaths.finalAnswerSynthesized,
-         conversationId,
-         {
+         await sendEvent(
+            producer,
+            schemaPaths.finalAnswerSynthesized,
             conversationId,
-            userId,
-            timestamp: new Date().toISOString(),
-            eventType: 'FinalAnswerSynthesized',
-            payload: { message: text },
-         }
-      );
+            {
+               conversationId,
+               userId,
+               timestamp: new Date().toISOString(),
+               eventType: 'FinalAnswerSynthesized',
+               payload: { message: text },
+            }
+         );
+         await markProcessed(idempotencyStore, conversationId);
+      } catch (error) {
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: (error as Error).message,
+                     payload: command,
+                  }),
+               },
+            ],
+         });
+      }
    },
    'synthesis-worker'
 );

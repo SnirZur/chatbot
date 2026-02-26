@@ -1,4 +1,3 @@
-import path from 'node:path';
 import {
    createKafka,
    createProducer,
@@ -13,44 +12,22 @@ import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
+import { createHistoryStore } from '../lib/historyStore';
 
 const kafka = createKafka('history-projection');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'history-projection-group');
+const historyStore = createHistoryStore('.state/history-projection');
 
-const historyFilePath = path.resolve('history.json');
-const historyMap = new Map<
-   string,
-   Array<{ role: 'user' | 'assistant'; content: string }>
->();
-
-const loadHistory = async () => {
-   const file = Bun.file(historyFilePath);
-   if (!(await file.exists())) return;
-   const data = await file.text();
-   const parsed = JSON.parse(data) as Record<
-      string,
-      Array<{ role: 'user' | 'assistant'; content: string }>
-   >;
-   if (parsed && typeof parsed === 'object') {
-      for (const [userId, history] of Object.entries(parsed)) {
-         if (Array.isArray(history)) historyMap.set(userId, history);
-      }
+const getHistory = async (userId: string) => {
+   try {
+      const state = await historyStore.get(userId);
+      return state.messages;
+   } catch (error) {
+      if ((error as { notFound?: boolean }).notFound) return [];
+      throw error;
    }
 };
-
-const saveHistory = async () => {
-   const obj: Record<
-      string,
-      Array<{ role: 'user' | 'assistant'; content: string }>
-   > = {};
-   for (const [userId, history] of historyMap.entries()) {
-      obj[userId] = history;
-   }
-   await Bun.write(historyFilePath, JSON.stringify(obj, null, 2));
-};
-
-await loadHistory();
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -87,10 +64,9 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const history = historyMap.get(event.userId) ?? [];
+         const history = await getHistory(event.userId);
          history.push({ role: 'user', content: event.payload.userInput });
-         historyMap.set(event.userId, history);
-         await saveHistory();
+         await historyStore.put(event.userId, { messages: history });
          return;
       }
 
@@ -111,10 +87,9 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const history = historyMap.get(event.userId) ?? [];
+         const history = await getHistory(event.userId);
          history.push({ role: 'assistant', content: event.payload.message });
-         historyMap.set(event.userId, history);
-         await saveHistory();
+         await historyStore.put(event.userId, { messages: history });
          return;
       }
 
@@ -135,8 +110,7 @@ await runConsumerWithRestart(
             });
             return;
          }
-         historyMap.delete(event.userId);
-         await saveHistory();
+         await historyStore.del(event.userId).catch(() => undefined);
          return;
       }
    },

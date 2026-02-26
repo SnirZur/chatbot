@@ -192,6 +192,7 @@ const waitForResponse = (conversationId: string, timeoutMs = 30000) =>
    });
 
 export const sendUserInput = async (userId: string, userInput: string) => {
+   // This gateway replaces a CLI-based user-interface.ts. We use a web UI for a better UX.
    await init();
    const conversationId = randomUUID();
    await producer.send({

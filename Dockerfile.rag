@@ -1,0 +1,6 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY src/python/requirements.txt /app/src/python/requirements.txt
+RUN pip install --no-cache-dir -r /app/src/python/requirements.txt
+COPY . /app
+CMD ["python", "src/python/rag_retriever_worker.py"]

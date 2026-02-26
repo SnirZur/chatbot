@@ -113,6 +113,33 @@ const sendToolInvocation = async (
    );
 };
 
+const failPlan = async (
+   conversationId: string,
+   userId: string,
+   reason: string,
+   payload?: unknown
+) => {
+   const producer = await producerPromise;
+   await producer.send({
+      topic: topics.deadLetterQueue,
+      messages: [
+         {
+            value: JSON.stringify({
+               error: reason,
+               payload,
+            }),
+         },
+      ],
+   });
+   await sendEvent(producer, schemaPaths.planFailed, conversationId, {
+      conversationId,
+      userId,
+      timestamp: new Date().toISOString(),
+      eventType: 'PlanFailed',
+      payload: { reason },
+   });
+};
+
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -140,16 +167,84 @@ const recoverRunningPlans = async () => {
 
 await recoverRunningPlans();
 
-await runConsumerWithRestart(
+const requestsLoop = runConsumerWithRestart(
+   requestsConsumer,
+   async ({ message }) => {
+      if (!message.value) return;
+      let command: unknown;
+      try {
+         command = JSON.parse(message.value.toString());
+      } catch (error) {
+         const producer = await producerPromise;
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: `Invalid JSON payload: ${(error as Error).message}`,
+                     payload: message.value.toString(),
+                  }),
+               },
+            ],
+         });
+         return;
+      }
+      try {
+         validateOrThrow(schemaPaths.toolInvocationRequested, command);
+      } catch (error) {
+         const producer = await producerPromise;
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: (error as Error).message,
+                     payload: command,
+                  }),
+               },
+            ],
+         });
+         return;
+      }
+      // Intentionally no state mutation here: orchestration state transitions
+      // are driven by immutable conversation events.
+   },
+   'orchestrator-requests'
+);
+
+const eventsLoop = runConsumerWithRestart(
    eventsConsumer,
    async ({ message }) => {
       if (!message.value) return;
-      const event = JSON.parse(message.value.toString());
-      if (!event || !event.eventType) return;
+      let event: unknown;
+      try {
+         event = JSON.parse(message.value.toString());
+      } catch (error) {
+         const producer = await producerPromise;
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: `Invalid JSON payload: ${(error as Error).message}`,
+                     payload: message.value.toString(),
+                  }),
+               },
+            ],
+         });
+         return;
+      }
+      if (!(event && typeof event === 'object' && 'eventType' in event)) return;
+      const eventRecord = event as {
+         eventType: string;
+         conversationId: string;
+         userId: string;
+         payload: Record<string, unknown>;
+      };
 
       const producer = await producerPromise;
 
-      if (event.eventType === 'PlanGenerated') {
+      if (eventRecord.eventType === 'PlanGenerated') {
          try {
             validateOrThrow(schemaPaths.planGenerated, event);
          } catch (error) {
@@ -166,7 +261,7 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const { conversationId, userId, payload } = event;
+         const { conversationId, userId, payload } = eventRecord;
          const existing = await store.get(conversationId).catch(() => null);
          if (existing && existing.status !== 'FAILED') {
             return;
@@ -174,19 +269,32 @@ await runConsumerWithRestart(
          const state: OrchestratorState = {
             conversationId,
             userId,
-            plan: payload.plan ?? [],
-            final_answer_synthesis_required:
-               payload.final_answer_synthesis_required ?? false,
+            plan: (payload.plan ?? []) as Array<{
+               tool: string;
+               parameters: Record<string, unknown>;
+            }>,
+            final_answer_synthesis_required: Boolean(
+               payload.final_answer_synthesis_required
+            ),
             stepIndex: 0,
             results: [],
             status: 'RUNNING',
          };
          await store.put(conversationId, state);
-         await sendToolInvocation(state, 0);
+         try {
+            await sendToolInvocation(state, 0);
+         } catch (error) {
+            await failPlan(
+               conversationId,
+               userId,
+               (error as Error).message,
+               state
+            );
+         }
          return;
       }
 
-      if (event.eventType === 'ToolInvocationResulted') {
+      if (eventRecord.eventType === 'ToolInvocationResulted') {
          try {
             validateOrThrow(schemaPaths.toolInvocationResulted, event);
          } catch (error) {
@@ -203,9 +311,11 @@ await runConsumerWithRestart(
             });
             return;
          }
-         const { conversationId, payload } = event as {
-            conversationId: string;
-            payload: { stepIndex: number; tool: string; result: unknown };
+         const conversationId = eventRecord.conversationId;
+         const payload = eventRecord.payload as {
+            stepIndex: number;
+            tool: string;
+            result: unknown;
          };
          const state = await store.get(conversationId).catch(() => null);
          if (!state) return;
@@ -252,11 +362,20 @@ await runConsumerWithRestart(
             return;
          }
 
-         await sendToolInvocation(state, state.stepIndex);
+         try {
+            await sendToolInvocation(state, state.stepIndex);
+         } catch (error) {
+            await failPlan(
+               conversationId,
+               state.userId,
+               (error as Error).message,
+               state
+            );
+         }
       }
 
-      if (event.eventType === 'PlanFailed') {
-         const { conversationId } = event as { conversationId: string };
+      if (eventRecord.eventType === 'PlanFailed') {
+         const { conversationId } = eventRecord;
          const state = await store.get(conversationId).catch(() => null);
          if (!state) return;
          state.status = 'FAILED';
@@ -266,10 +385,4 @@ await runConsumerWithRestart(
    'orchestrator-events'
 );
 
-await runConsumerWithRestart(
-   requestsConsumer,
-   async () => {
-      // intentionally empty: this consumer keeps the group active to avoid duplicate invocations
-   },
-   'orchestrator-requests'
-);
+await Promise.all([requestsLoop, eventsLoop]);

@@ -1,9 +1,12 @@
 import json
 import os
+import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import chromadb
+from jsonschema import Draft7Validator
 from kafka import KafkaConsumer, KafkaProducer
 from sentence_transformers import SentenceTransformer
 
@@ -12,34 +15,78 @@ KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092").split(",")
 TOPIC_REQUESTS = "tool-invocation-requests"
 TOPIC_EVENTS = "conversation-events"
 TOPIC_DLQ = "dead-letter-queue"
-TOPIC_SCHEMA_REGISTRY = "schema-registry"
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "products"
-DB_DIR = Path(__file__).resolve().parents[2] / "python-service" / "chroma_db"
+ROOT_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = ROOT_DIR / "data" / "products"
+DB_DIR = ROOT_DIR / "python-service" / "chroma_db"
 COLLECTION_NAME = "products_kb"
 
-producer = KafkaProducer(bootstrap_servers=KAFKA_BROKERS)
+SCHEMA_COMMAND = ROOT_DIR / "src" / "schemas" / "commands" / "toolInvocationRequested.json"
+SCHEMA_EVENT = ROOT_DIR / "src" / "schemas" / "events" / "toolInvocationResulted.json"
+
+IDEMPOTENCY_DB = DB_DIR / "idempotency.sqlite3"
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def load_schema(path: Path) -> Draft7Validator:
+    with path.open("r", encoding="utf-8") as file:
+        schema = json.load(file)
+    return Draft7Validator(schema)
+
+
+COMMAND_VALIDATOR = load_schema(SCHEMA_COMMAND)
+EVENT_VALIDATOR = load_schema(SCHEMA_EVENT)
+
+
+def validate_or_raise(validator: Draft7Validator, payload: Dict[str, Any], label: str) -> None:
+    errors = sorted(validator.iter_errors(payload), key=lambda e: e.path)
+    if errors:
+        message = "; ".join(error.message for error in errors)
+        raise ValueError(f"Schema validation failed for {label}: {message}")
+
+
+def ensure_idempotency_db() -> sqlite3.Connection:
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(IDEMPOTENCY_DB), isolation_level=None)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS processed_invocations (
+            invocation_id TEXT PRIMARY KEY,
+            processed_at TEXT NOT NULL
+        )
+        """
+    )
+    return conn
+
+
+def mark_processed_once(conn: sqlite3.Connection, invocation_id: str) -> bool:
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO processed_invocations (invocation_id, processed_at) VALUES (?, ?)",
+        (invocation_id, utc_now_iso()),
+    )
+    return cursor.rowcount == 1
+
+
+producer = KafkaProducer(
+    bootstrap_servers=KAFKA_BROKERS,
+    value_serializer=lambda value: json.dumps(value).encode("utf-8"),
+)
 consumer = KafkaConsumer(
     TOPIC_REQUESTS,
     bootstrap_servers=KAFKA_BROKERS,
     group_id="rag-retriever-worker",
     auto_offset_reset="earliest",
-    enable_auto_commit=True,
-)
-schema_consumer = KafkaConsumer(
-    TOPIC_SCHEMA_REGISTRY,
-    bootstrap_servers=KAFKA_BROKERS,
-    group_id="rag-retriever-schema-registry",
-    auto_offset_reset="earliest",
-    enable_auto_commit=True,
+    enable_auto_commit=False,
+    value_deserializer=lambda value: json.loads(value.decode("utf-8")),
 )
 
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 client = chromadb.PersistentClient(path=str(DB_DIR))
 collection = client.get_or_create_collection(name=COLLECTION_NAME)
-
-processed = set()
-schema_registry = {}
+idempotency_conn = ensure_idempotency_db()
 
 
 def read_text_files(directory: Path) -> List[Tuple[str, str]]:
@@ -68,130 +115,67 @@ def chunk_text(text: str, min_size: int = 600, max_size: int = 1200, overlap: in
     return chunks
 
 
-def ensure_indexed():
+def ensure_indexed() -> None:
     if collection.count() > 0:
         return
     docs = read_text_files(DATA_DIR)
-    chunks = []
+    chunks: List[Tuple[str, int, str]] = []
     for filename, text in docs:
         parts = chunk_text(text)
         for idx, part in enumerate(parts):
             chunks.append((filename, idx, part))
     if not chunks:
         return
-    embeddings = model.encode([c[2] for c in chunks])
-    ids = [f"{c[0]}-{c[1]}" for c in chunks]
-    metadatas = [{"source": c[0], "index": c[1]} for c in chunks]
-    collection.add(ids=ids, documents=[c[2] for c in chunks], embeddings=embeddings, metadatas=metadatas)
+    embeddings = model.encode([chunk[2] for chunk in chunks])
+    ids = [f"{chunk[0]}-{chunk[1]}" for chunk in chunks]
+    metadatas = [{"source": chunk[0], "index": chunk[1]} for chunk in chunks]
+    collection.add(ids=ids, documents=[chunk[2] for chunk in chunks], embeddings=embeddings, metadatas=metadatas)
 
 
-def send_event(payload: Dict):
-    producer.send(TOPIC_EVENTS, json.dumps(payload).encode("utf-8"))
+def publish_dlq(payload: Any, error: str) -> None:
+    future = producer.send(TOPIC_DLQ, {"error": error, "payload": payload})
+    future.get(timeout=10)
 
 
-def send_dlq(payload: Dict, error: str):
-    producer.send(TOPIC_DLQ, json.dumps({"error": error, "payload": payload}).encode("utf-8"))
+def publish_tool_result(event: Dict[str, Any]) -> None:
+    future = producer.send(TOPIC_EVENTS, event)
+    future.get(timeout=10)
 
 
 ensure_indexed()
 
-def load_registry():
-    for message in schema_consumer:
-        try:
-            entry = json.loads(message.value.decode("utf-8"))
-            schema_path = entry.get("schemaPath")
-            schema = entry.get("schema")
-            if schema_path and schema:
-                schema_registry[schema_path] = schema
-        except Exception:
-            continue
-        if len(schema_registry) >= 1:
-            break
-
-
-load_registry()
-
-def validate_tool_invocation_command(command: Dict) -> bool:
-    if not isinstance(command, dict):
-        return False
-    if command.get("commandType") != "ToolInvocationRequested":
-        return False
-    if not isinstance(command.get("conversationId"), str):
-        return False
-    if not isinstance(command.get("userId"), str):
-        return False
-    if not isinstance(command.get("timestamp"), str):
-        return False
-    payload = command.get("payload", {})
-    if not isinstance(payload, dict):
-        return False
-    if not isinstance(payload.get("invocationId"), str):
-        return False
-    if not isinstance(payload.get("tool"), str):
-        return False
-    if not isinstance(payload.get("stepIndex"), (int, float)):
-        return False
-    return True
-
-
-def validate_tool_invocation_resulted_event(event: Dict) -> bool:
-    if not isinstance(event, dict):
-        return False
-    if event.get("eventType") != "ToolInvocationResulted":
-        return False
-    if not isinstance(event.get("conversationId"), str):
-        return False
-    if not isinstance(event.get("userId"), str):
-        return False
-    if not isinstance(event.get("timestamp"), str):
-        return False
-    payload = event.get("payload", {})
-    if not isinstance(payload, dict):
-        return False
-    if not isinstance(payload.get("invocationId"), str):
-        return False
-    if not isinstance(payload.get("tool"), str):
-        return False
-    if not isinstance(payload.get("stepIndex"), (int, float)):
-        return False
-    if "result" not in payload:
-        return False
-    return True
-
-
 for message in consumer:
+    command = message.value
     try:
-        command = json.loads(message.value.decode("utf-8"))
-    except Exception:
-        continue
-
-    try:
-        if not validate_tool_invocation_command(command):
-            send_dlq(command, "Schema validation failed for commands/toolInvocationRequested.json")
-            continue
+        validate_or_raise(COMMAND_VALIDATOR, command, "commands/toolInvocationRequested.json")
         payload = command.get("payload", {})
         if payload.get("tool") != "getProductInformation":
+            consumer.commit()
             continue
 
-        invocation_id = payload.get("invocationId")
-        if invocation_id in processed:
-            continue
-        processed.add(invocation_id)
+        invocation_id = str(payload.get("invocationId", ""))
+        if not invocation_id:
+            raise ValueError("Missing invocationId")
 
-        query = str(payload.get("parameters", {}).get("query", ""))
+        inserted = mark_processed_once(idempotency_conn, invocation_id)
+        if not inserted:
+            consumer.commit()
+            continue
+
+        query = str(payload.get("parameters", {}).get("query", "")).strip()
         if not query:
             result = {"chunks": []}
         else:
             embedding = model.encode([query])
-            results = collection.query(query_embeddings=embedding, n_results=3)
-            documents = results.get("documents", [[]])
+            matches = collection.query(query_embeddings=embedding, n_results=3)
+            documents = matches.get("documents", [[]])
             chunks = documents[0] if documents else []
             result = {"chunks": chunks}
 
         event = {
             "conversationId": command.get("conversationId"),
             "userId": command.get("userId"),
-            "timestamp": "{}".format(message.timestamp),
+            "timestamp": utc_now_iso(),
             "eventType": "ToolInvocationResulted",
             "payload": {
                 "invocationId": invocation_id,
@@ -200,9 +184,13 @@ for message in consumer:
                 "result": result,
             },
         }
-        if not validate_tool_invocation_resulted_event(event):
-            send_dlq(event, "Schema validation failed for events/toolInvocationResulted.json")
-            continue
-        send_event(event)
+        validate_or_raise(EVENT_VALIDATOR, event, "events/toolInvocationResulted.json")
+        publish_tool_result(event)
+        consumer.commit()
     except Exception as exc:
-        send_dlq(command, str(exc))
+        try:
+            publish_dlq(command, str(exc))
+            consumer.commit()
+        except Exception:
+            # Keep offset uncommitted if we cannot route the error safely.
+            pass

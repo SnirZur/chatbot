@@ -1,6 +1,7 @@
 import {
    Kafka,
    Partitioners,
+   logLevel,
    type Consumer,
    type EachMessagePayload,
    type Producer,
@@ -10,7 +11,14 @@ import { topics } from './topics';
 const brokers = (process.env.KAFKA_BROKERS || 'localhost:9092').split(',');
 
 export const createKafka = (clientId: string) =>
-   new Kafka({ clientId, brokers });
+   new Kafka({
+      clientId,
+      brokers,
+      logLevel:
+         process.env.KAFKAJS_LOG_LEVEL === 'none'
+            ? logLevel.NOTHING
+            : logLevel.INFO,
+   });
 
 export const createProducer = async (kafka: Kafka): Promise<Producer> => {
    const producer = kafka.producer({

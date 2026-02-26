@@ -58,9 +58,9 @@ export const schemaPaths = {
 };
 
 export const topicSchemaMap = {
-   [topics.userCommands]: schemaPaths.userQueryReceived,
+   [topics.userCommands]: null,
    [topics.toolInvocationRequests]: schemaPaths.toolInvocationRequested,
-   [topics.synthesisRequests]: schemaPaths.synthesizeFinalAnswerRequested,
+   [topics.finalSynthesisRequests]: schemaPaths.synthesizeFinalAnswerRequested,
    [topics.conversationEvents]: null,
    [topics.deadLetterQueue]: null,
 } as const;
