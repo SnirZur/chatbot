@@ -44,6 +44,8 @@ services:
     depends_on:
       - kafka
       - ollama
+    env_file:
+      - packages/server/.env
     environment:
       KAFKA_BROKERS: kafka:9092
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -70,6 +72,8 @@ services:
     command: ["src/node/services/tool-worker.ts"]
     depends_on:
       - kafka
+    env_file:
+      - packages/server/.env
     environment:
       KAFKA_BROKERS: kafka:9092
       WEATHER_API_KEY: ${WEATHER_API_KEY}
@@ -84,6 +88,8 @@ services:
     depends_on:
       - kafka
       - ollama
+    env_file:
+      - packages/server/.env
     environment:
       KAFKA_BROKERS: kafka:9092
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -98,6 +104,8 @@ services:
     command: ["src/node/services/synthesis-worker.ts"]
     depends_on:
       - kafka
+    env_file:
+      - packages/server/.env
     environment:
       KAFKA_BROKERS: kafka:9092
       OPENAI_API_KEY: ${OPENAI_API_KEY}
