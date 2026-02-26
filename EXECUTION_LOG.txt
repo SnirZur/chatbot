@@ -1,45 +1,113 @@
-Session 1
-UI: No history found.
-UI: Using userId: 8d9b2c6e-4c2c-4db2-a784-47f3f3f2b33f
-You: כמה חם בתל אביב?
-Bot: 22 מעלות, מעונן חלקית.
-You: כמה זה דולר בשקלים?
-Bot: שער הדולר היציג הוא 3.75 ש"ח
-You: כמה זה 150 ועוד 20?
-Bot: התוצאה היא 170
-You: מה דעתך על בינה מלאכותית?
-Bot: בינה מלאכותית היא כמו צינור ETL שעובד מהר יותר ממה שהדאטה שלך מסודרת בו.
+EXECUTION LOG
+Project: Advanced Data Engineering Final Project
+Date: 2026-02-26
 
-(Stop all services)
+==================================================
+Environment Bring-up
+==================================================
+Command:
+  docker compose up -d kafka zookeeper ollama chromadb router orchestrator math-worker exchange-rate-worker weather-worker llm-inference-worker rag-retriever-worker aggregator synthesis-worker history-projection metrics
+Result:
+  All listed services started in Running state.
 
-Session 2
-UI: History found.
-You: אתה זוכר מה שאלתי קודם?
-Bot: כן. שאלת על מזג האוויר, שער דולר וחישוב 150 ועוד 20.
+Command:
+  docker compose run --rm --no-deps user-interface
+Result:
+  CLI started with generated userId and accepted input.
 
-/reset
-Bot: היסטוריית השיחה אופסה. נתחיל שיחה חדשה.
+==================================================
+Scenario 1: Multi-step Orchestration (Weather + FX)
+==================================================
+User:
+  מה מזג האוויר בתל אביב וכמה הדולר שווה?
+Bot:
+  מזג האוויר בתל אביב: 13 מעלות, שמיים בהירים. שער הדולר היציג הוא 3.75 ש"ח.
 
-Resilience Demos
+==================================================
+Scenario 2: Multi-step Orchestration (FX + Math)
+==================================================
+User:
+  יש לי 200 ש"ח. מוצר עולה 25 דולר. כמה יישאר לי אחרי קנייה?
+Bot:
+  לפי שער של 3.75 ש"ח לדולר, 25 דולר הם 93.75 ש"ח, ויישארו לך 106.25 ש"ח.
 
-Worker Crash + Recovery (tool-worker)
-Command: docker compose stop tool-worker
-User: מה מזג האוויר בתל אביב?
-Bot: (timeout / no response)
+==================================================
+Scenario 3: Multi-step Orchestration (FX + Math + General LLM)
+==================================================
+User:
+  חשב לי כמה נשאר מ-200 ש"ח אחרי רכישה ב-25 דולר, ותוסיף סיכום קצר על המוצר evophone-x.
+Bot:
+   נשארו 106.25 ש"ח מתוך 200 ש"ח לאחר רכישה ב-25 דולר. evophone-x הוא מכשיר סלולרי חכם עם מסך מגע, מעבד מהיר ואפשרויות אבטחה ביומטריות.
 
-Command: docker compose start tool-worker
-User: מה מזג האוויר בתל אביב?
-Bot: 22 מעלות, מעונן חלקית.
+==================================================
+Scenario 4: RAG #1 (Product Information)
+==================================================
+User:
+  תן לי מידע טכני על PrintForge Mini כולל מפרט עיקרי וסיכום קצר.
+Bot:
+   ה-PrintForge Mini היא מדפסת תלת-מימד לשולחן עם נפח בנייה של 180x180x180 מ"מ. היא משתמשת באקסטרודר FDM עם צינור בקוטר 0.4 מ"מ ותומכת בחומרי PLA, PETG ו-TPU. המדפסת מגיעה עם מיטת חימום עד 90°C ואקסטרודר ישיר. מהירות הדפסה מומלצת
 
-Orchestrator Crash + Recovery
-Command: docker compose stop orchestrator
-User: ליוסי יש 200 ש"ח ומוצר עולה 25 דולר — כמה יישאר לו אחרי ההמרה והקנייה?
-Bot: (timeout / no response)
+==================================================
+Scenario 5: RAG #2 (Battery Info Retrieval)
+==================================================
+User:
+  מה זמן הסוללה של EvoPhone X?
+Bot:
+  EvoPhone X כולל סוללה של 4,800mAh, זמן שימוש מעורב עד כ-24 שעות, ועד כ-18 שעות ניגון וידאו.
 
-Command: docker compose start orchestrator
-User: ליוסי יש 200 ש"ח ומוצר עולה 25 דולר — כמה יישאר לו אחרי ההמרה והקנייה?
-Bot: ליוסי יישארו 106.25 ש"ח אחרי ההמרה והקנייה.
+==================================================
+Resilience Demo 1: Worker Crash + Recovery
+==================================================
+Step A - stop weather worker during request processing
+Command:
+  docker compose stop weather-worker
+User:
+  כמה חם בתל אביב?
+Observed:
+  CLI timeout (no final answer while worker is down)
 
-Duplicate Invocation (Idempotency)
-Action: resend the same ToolInvocationRequested event (same invocationId).
-Result: tool-worker ignores duplicate invocationId, no duplicated ToolInvocationResulted event emitted.
+Step B - restart worker
+Command:
+  docker compose start weather-worker
+User:
+  כמה חם בתל אביב?
+Bot:
+  13 מעלות, שמיים בהירים.
+
+==================================================
+Resilience Demo 2: Orchestrator Crash + Recovery
+==================================================
+Step A - stop orchestrator
+Command:
+  docker compose stop orchestrator
+User:
+  כמה זה 7 ועוד 4?
+Observed:
+  CLI timeout (plan not progressing while orchestrator is down)
+
+Step B - start orchestrator
+Command:
+  docker compose start orchestrator
+User:
+  כמה זה 7 ועוד 4?
+Bot:
+  התוצאה היא 11.
+
+Recovery evidence:
+  Orchestrator resumed event handling and completed the next request end-to-end.
+
+==================================================
+Resilience Demo 3: Duplicate Invocation / Idempotency
+==================================================
+Action:
+  Sent duplicate tool invocation request with same invocationId (test replay).
+Observed:
+  Worker duplicate protection prevented duplicate business effect.
+  No duplicate final user-visible answer generated for the same invocation.
+
+==================================================
+Operational Notes
+==================================================
+- "unknown format date-time" warnings appeared from AJV format handling but did not block message flow.
+- Early Kafka coordinator warnings during startup were transient; steady-state processing continued.
+- Conversation-events stream confirms event-driven sequence from user command to final synthesis.
