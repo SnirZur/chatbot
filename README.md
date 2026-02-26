@@ -61,13 +61,13 @@ Router features:
 
 
 
-operation                      | module       | duration (ms) | precisement
+operation                      | module       | duration (ms) | precise | price
 
-Router                         | ollama       | 9050          | 5
-Router Fallback                | OpenAi       | 2869          | 5
-General chat                   | ollama       | 18889         | 5
-Review sentiment               | Hugging face | 1106          | 5
-Review Analysis                | OpenAi       | 2783          | 5
-RAG retrival                   | Hugging face | 616           | 5
-RAG Generation                 | OpenAi       | 4368          | 5
-Orchestration Synthesis        | OpenAi       | 1193          | 5
+Router                         | ollama       | 9050          | 5       | FREE
+Router Fallback                | OpenAi       | 2869          | 5       | under token limit
+General chat                   | ollama       | 18889         | 5       | FREE
+Review sentiment               | Hugging face | 1106          | 5       | FREE
+Review Analysis                | OpenAi       | 2783          | 5       | under token limit
+RAG retrival                   | Hugging face | 616           | 5       | FREE
+RAG Generation                 | OpenAi       | 4368          | 5       | under token limit
+Orchestration Synthesis        | OpenAi       | 1193          | 5       | under token limit
