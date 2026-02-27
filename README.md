@@ -144,3 +144,15 @@ Model comparison note:
 
 
 </div>
+
+
+operation                      | module       | duration (ms) | precise | price
+
+Router                         | ollama       | 9050          | 5       | FREE
+Router Fallback                | OpenAi       | 2869          | 5       | under token limit
+General chat                   | ollama       | 18889         | 5       | FREE
+Review sentiment               | OpenAi       | 1106          | 5       | FREE
+Review Analysis                | OpenAi       | 2783          | 5       | under token limit
+RAG retrival                   | all-MiniLM-L6-v2 | 616           | 5       | FREE
+RAG Generation                 | OpenAi       | 4368          | 5       | under token limit
+Orchestration Synthesis        | OpenAi       | 1193          | 5       | under token limit
