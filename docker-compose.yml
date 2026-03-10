@@ -1,3 +1,4 @@
+version: "3.9"
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
@@ -24,6 +25,13 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
 
+    healthcheck:
+      test: ["CMD", "bash", "-c", ">/dev/tcp/localhost/9092"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
   ollama:
     image: ollama/ollama:latest
     ports:
@@ -39,11 +47,14 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/router.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/router.ts
     depends_on:
-      - kafka
-      - ollama
+      kafka:
+        condition: service_healthy
+      ollama:
+        condition: service_started
     env_file:
       - packages/server/.env
     environment:
@@ -56,10 +67,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/orchestrator.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/orchestrator.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
 
@@ -68,10 +81,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/math-worker.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/math-worker.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
 
@@ -80,10 +95,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/exchange-rate-worker.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/exchange-rate-worker.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
 
@@ -92,10 +109,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/weather-worker.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/weather-worker.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     env_file:
       - packages/server/.env
     environment:
@@ -107,11 +126,14 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/llm-inference-worker.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/llm-inference-worker.ts
     depends_on:
-      - kafka
-      - ollama
+      kafka:
+        condition: service_healthy
+      ollama:
+        condition: service_started
     env_file:
       - packages/server/.env
     environment:
@@ -124,10 +146,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/synthesis-worker.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/synthesis-worker.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     env_file:
       - packages/server/.env
     environment:
@@ -139,10 +163,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/aggregator.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/aggregator.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
 
@@ -151,10 +177,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/history-projection.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/history-projection.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
 
@@ -163,10 +191,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/services/metrics.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/services/metrics.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
 
@@ -175,10 +205,12 @@ services:
     working_dir: /app
     volumes:
       - ./:/app
-    entrypoint: ["bun"]
-    command: ["src/node/user-interface.ts"]
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun src/node/user-interface.ts
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
       KAFKAJS_LOG_LEVEL: none
@@ -193,8 +225,10 @@ services:
     volumes:
       - ./:/app
     depends_on:
-      - kafka
-      - chromadb
+      kafka:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
     environment:
       KAFKA_BROKERS: kafka:9092
 

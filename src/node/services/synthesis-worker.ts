@@ -53,6 +53,7 @@ await runConsumerWithRestart(
       try {
          command = JSON.parse(message.value.toString());
       } catch (error) {
+         console.error('synthesis-worker: Invalid JSON payload', error);
          await producer.send({
             topic: topics.deadLetterQueue,
             messages: [
@@ -67,12 +68,23 @@ await runConsumerWithRestart(
          return;
       }
       const commandType = (command as { commandType?: string }).commandType;
+      const conversationId = (command as { conversationId?: string })
+         .conversationId;
+      console.log('synthesis-worker received command', {
+         conversationId,
+         commandType,
+      });
       if (commandType !== 'SynthesizeFinalAnswerRequested') {
+         console.log(
+            'synthesis-worker: Skipping command with type',
+            commandType
+         );
          return;
       }
       try {
          validateOrThrow(schemaPaths.synthesizeFinalAnswerRequested, command);
       } catch (error) {
+         console.error('synthesis-worker: Schema validation failed', error);
          await producer.send({
             topic: topics.deadLetterQueue,
             messages: [
@@ -87,12 +99,16 @@ await runConsumerWithRestart(
          return;
       }
 
-      const { conversationId, userId, payload } = command as {
+      const { userId, payload } = command as {
          conversationId: string;
          userId: string;
          payload: { userInput: string; toolResults: unknown[] };
       };
       if (await hasBeenProcessed(idempotencyStore, conversationId)) {
+         console.log(
+            'synthesis-worker: Skipping already processed',
+            conversationId
+         );
          return;
       }
 
@@ -106,6 +122,10 @@ await runConsumerWithRestart(
       );
 
       try {
+         console.log(
+            'synthesis-worker: Generating final answer for',
+            conversationId
+         );
          const text = await generateWithOpenAI({
             model: 'gpt-3.5-turbo',
             instructions: synthesisPrompt,
@@ -114,6 +134,10 @@ await runConsumerWithRestart(
             temperature: 0.2,
          });
 
+         console.log(
+            'synthesis-worker: Emitting FinalAnswerSynthesized for',
+            conversationId
+         );
          await sendEvent(
             producer,
             schemaPaths.finalAnswerSynthesized,
@@ -128,6 +152,7 @@ await runConsumerWithRestart(
          );
          await markProcessed(idempotencyStore, conversationId);
       } catch (error) {
+         console.error('synthesis-worker: Error during synthesis', error);
          await producer.send({
             topic: topics.deadLetterQueue,
             messages: [

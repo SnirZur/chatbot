@@ -11,11 +11,15 @@ export const hasBeenProcessed = async (
    key: string
 ) => {
    try {
-      await store.get(key);
+      const value = await store.get(key);
+      if (value === undefined || value === null) {
+         return false;
+      }
       return true;
    } catch (error) {
+      console.log('hasBeenProcessed error for key', key, ':', error);
       if ((error as { notFound?: boolean }).notFound) return false;
-      throw error;
+      return false; // Treat all errors as not processed for safety
    }
 };
 

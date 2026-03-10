@@ -27,6 +27,19 @@ const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'router-service-group');
 const idempotencyStore = createIdempotencyStore('.state/idempotency/router');
 
+// Debug: Print all keys in the idempotency store at startup
+const printIdempotencyKeys = async (label = '') => {
+   const keys = [];
+   for await (const key of idempotencyStore.keys()) {
+      keys.push(key);
+   }
+   console.log(`Idempotency store keys${label ? ' ' + label : ''}:`, keys);
+};
+
+(async () => {
+   await printIdempotencyKeys('at startup');
+})();
+
 const routerPrompt = fs.readFileSync(
    path.resolve('prompts/router.txt'),
    'utf-8'
@@ -277,15 +290,27 @@ await runConsumerWithRestart(
       try {
          if (!message.value) return;
          const command = JSON.parse(message.value.toString());
+         console.log('router-service received command', command);
          const commandType = command.commandType as string | undefined;
          const incomingConversationId = String(command.conversationId ?? '');
          const dedupeKey = incomingConversationId
             ? `${commandType ?? 'unknown'}:${incomingConversationId}`
             : null;
          if (dedupeKey) {
-            if (await hasBeenProcessed(idempotencyStore, dedupeKey)) return;
+            await printIdempotencyKeys('before processing command');
+            if (await hasBeenProcessed(idempotencyStore, dedupeKey)) {
+               console.log(
+                  'router-service skipping already processed',
+                  dedupeKey
+               );
+               await printIdempotencyKeys('after skipping command');
+               return;
+            }
          }
          if (commandType === 'UserControl') {
+            await printIdempotencyKeys(
+               'before marking processed (UserControl)'
+            );
             try {
                validateOrThrow(schemaPaths.userControl, command);
             } catch (error) {
@@ -312,14 +337,21 @@ await runConsumerWithRestart(
                }
             );
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
+            await printIdempotencyKeys('after marking processed (UserControl)');
             return;
          }
 
          try {
+            await printIdempotencyKeys(
+               'before marking processed (UserQueryReceived)'
+            );
             validateOrThrow(schemaPaths.userQueryReceived, command);
          } catch (error) {
             await sendToDlq(command, (error as Error).message);
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
+            await printIdempotencyKeys(
+               'after marking processed (UserQueryReceived)'
+            );
             return;
          }
 
@@ -330,6 +362,12 @@ await runConsumerWithRestart(
             payload: { userInput: string };
          };
 
+         console.log('router-service about to emit UserQueryEvent', {
+            conversationId,
+            userId,
+            timestamp,
+            userInput: payload.userInput,
+         });
          await sendEvent(producer, schemaPaths.userQueryEvent, conversationId, {
             conversationId,
             userId,
@@ -383,11 +421,14 @@ await runConsumerWithRestart(
             );
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
          } catch (error) {
+            await printIdempotencyKeys('before marking processed (error)');
             await sendToDlq(planJson, (error as Error).message);
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
+            await printIdempotencyKeys('after marking processed (error)');
          }
       } catch (error) {
          console.error('router-service failed:', error);
+         console.error('router-service failed processing message', error);
          await sendToDlq(
             message.value ? message.value.toString() : null,
             (error as Error).message
