@@ -27,6 +27,18 @@ const consumerPromise = createConsumer(
 const userId = randomUUID();
 const pending = new Map<string, (response: BotResponse) => void>();
 const conversationState = new Map<string, ConversationState>();
+const LRI = '\u2066';
+const RLI = '\u2067';
+const PDI = '\u2069';
+
+const stabilizeBidi = (text: string) => {
+   if (!/[\u0590-\u05FF]/.test(text)) return text;
+   const wrappedLtrTokens = text.replace(
+      /([A-Za-z][A-Za-z0-9._:+-]*|\d+(?:[.,]\d+)?)/g,
+      `${LRI}$1${PDI}`
+   );
+   return `${RLI}${wrappedLtrTokens}${PDI}`;
+};
 
 const toolToService: Record<string, string> = {
    calculateMath: 'math-worker',
@@ -157,7 +169,7 @@ while (true) {
 
    try {
       const response = await waitForResponse(conversationId);
-      console.log(`Bot: ${response.message}`);
+      console.log(`Bot: ${stabilizeBidi(response.message)}`);
    } catch {
       const serviceName = guessUnavailableService(conversationId);
       pending.delete(conversationId);
