@@ -72,7 +72,7 @@ const guessUnavailableService = (conversationId: string): string => {
    }
 };
 
-const waitForResponse = (conversationId: string, timeoutMs = 30000) =>
+const waitForResponse = (conversationId: string, timeoutMs = 90000) =>
    new Promise<BotResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
          pending.delete(conversationId);
