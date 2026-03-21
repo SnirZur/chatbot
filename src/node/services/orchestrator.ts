@@ -344,7 +344,8 @@ const eventsLoop = runConsumerWithRestart(
          if (state.stepIndex >= state.plan.length) {
             state.status = 'COMPLETED';
             await store.put(conversationId, state);
-            // Emit PlanCompleted event as before
+            // Emit PlanCompleted event.
+            // Final synthesis command emission belongs to aggregator service.
             await sendEvent(
                producer,
                schemaPaths.planCompleted,
@@ -360,29 +361,6 @@ const eventsLoop = runConsumerWithRestart(
                   },
                }
             );
-
-            // If final answer synthesis is required, emit SynthesizeFinalAnswerRequested to the correct topic
-            if (state.final_answer_synthesis_required) {
-               const synthPayload = {
-                  conversationId,
-                  userId: state.userId,
-                  timestamp: new Date().toISOString(),
-                  commandType: 'SynthesizeFinalAnswerRequested',
-                  payload: {
-                     userInput: state.plan[0]?.parameters?.message || '',
-                     toolResults: state.results,
-                  },
-               };
-               await producer.send({
-                  topic: topics.finalSynthesisRequests,
-                  messages: [
-                     {
-                        key: conversationId,
-                        value: JSON.stringify(synthPayload),
-                     },
-                  ],
-               });
-            }
             return;
          }
 
