@@ -7,6 +7,7 @@ export type OrchestratorState = {
    final_answer_synthesis_required: boolean;
    stepIndex: number;
    results: Array<{ tool: string; result: unknown }>;
+   planCompletedEmitted: boolean;
    status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
 };
 

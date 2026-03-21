@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
    createKafka,
    createProducer,
@@ -27,6 +28,13 @@ const consumerRequestsPromise = createConsumer(
 );
 
 const store = createStateStore('.state/orchestrator');
+
+type ConversationEventRecord = {
+   eventType: string;
+   conversationId: string;
+   userId: string;
+   payload: Record<string, unknown>;
+};
 
 const resolvePlaceholders = (
    params: Record<string, unknown>,
@@ -113,6 +121,23 @@ const sendToolInvocation = async (
    );
 };
 
+const emitPlanCompleted = async (state: OrchestratorState) => {
+   if (state.planCompletedEmitted) return;
+   const producer = await producerPromise;
+   await sendEvent(producer, schemaPaths.planCompleted, state.conversationId, {
+      conversationId: state.conversationId,
+      userId: state.userId,
+      timestamp: new Date().toISOString(),
+      eventType: 'PlanCompleted',
+      payload: {
+         final_answer_synthesis_required: state.final_answer_synthesis_required,
+      },
+   });
+   state.planCompletedEmitted = true;
+   state.status = 'COMPLETED';
+   await store.put(state.conversationId, state);
+};
+
 const failPlan = async (
    conversationId: string,
    userId: string,
@@ -140,6 +165,79 @@ const failPlan = async (
    });
 };
 
+const buildStateFromPlan = (
+   eventRecord: ConversationEventRecord
+): OrchestratorState => ({
+   conversationId: eventRecord.conversationId,
+   userId: eventRecord.userId,
+   plan: (eventRecord.payload.plan ?? []) as Array<{
+      tool: string;
+      parameters: Record<string, unknown>;
+   }>,
+   final_answer_synthesis_required: Boolean(
+      eventRecord.payload.final_answer_synthesis_required
+   ),
+   stepIndex: 0,
+   results: [],
+   planCompletedEmitted: false,
+   status: 'RUNNING',
+});
+
+const applyEventToState = async (eventRecord: ConversationEventRecord) => {
+   if (eventRecord.eventType === 'PlanGenerated') {
+      const state = buildStateFromPlan(eventRecord);
+      await store.put(eventRecord.conversationId, state);
+      return state;
+   }
+
+   if (eventRecord.eventType === 'ToolInvocationResulted') {
+      const payload = eventRecord.payload as {
+         stepIndex: number;
+         tool: string;
+         result: unknown;
+      };
+      const state = await store
+         .get(eventRecord.conversationId)
+         .catch(() => null);
+      if (!state) return null;
+      if (!state.results[payload.stepIndex]) {
+         state.results[payload.stepIndex] = {
+            tool: payload.tool,
+            result: payload.result,
+         };
+      }
+      state.stepIndex = Math.max(state.stepIndex, payload.stepIndex + 1);
+      if (state.stepIndex >= state.plan.length) {
+         state.status = 'COMPLETED';
+      }
+      await store.put(eventRecord.conversationId, state);
+      return state;
+   }
+
+   if (eventRecord.eventType === 'PlanFailed') {
+      const state = await store
+         .get(eventRecord.conversationId)
+         .catch(() => null);
+      if (!state) return null;
+      state.status = 'FAILED';
+      await store.put(eventRecord.conversationId, state);
+      return state;
+   }
+
+   if (eventRecord.eventType === 'PlanCompleted') {
+      const state = await store
+         .get(eventRecord.conversationId)
+         .catch(() => null);
+      if (!state) return null;
+      state.status = 'COMPLETED';
+      state.planCompletedEmitted = true;
+      await store.put(eventRecord.conversationId, state);
+      return state;
+   }
+
+   return null;
+};
+
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -157,14 +255,85 @@ await requestsConsumer.subscribe({
    fromBeginning: true,
 });
 
+const replayConversationEvents = async () => {
+   const admin = kafka.admin();
+   await admin.connect();
+   let lastOffset = '0';
+   try {
+      const offsets = await admin.fetchTopicOffsets(topics.conversationEvents);
+      lastOffset = offsets[0]?.offset ?? '0';
+   } finally {
+      await admin.disconnect();
+   }
+
+   await store.clear();
+
+   if (Number(lastOffset) === 0) {
+      return;
+   }
+
+   const replayConsumer = await createConsumer(
+      kafka,
+      `orchestrator-replay-${randomUUID()}`
+   );
+   await replayConsumer.subscribe({
+      topic: topics.conversationEvents,
+      fromBeginning: true,
+   });
+
+   await new Promise<void>((resolve, reject) => {
+      let resolved = false;
+      void replayConsumer
+         .run({
+            autoCommit: false,
+            eachMessage: async ({ message, heartbeat }) => {
+               if (!message.value) return;
+               const offset = Number(message.offset);
+               let event: unknown;
+               try {
+                  event = JSON.parse(message.value.toString());
+               } catch {
+                  return;
+               }
+               if (
+                  event &&
+                  typeof event === 'object' &&
+                  'eventType' in event &&
+                  'conversationId' in event &&
+                  'userId' in event &&
+                  'payload' in event
+               ) {
+                  await applyEventToState(event as ConversationEventRecord);
+               }
+               await heartbeat();
+               if (offset >= Number(lastOffset) - 1 && !resolved) {
+                  resolved = true;
+                  resolve();
+               }
+            },
+         })
+         .catch((error) => {
+            if (!resolved) reject(error);
+         });
+   });
+
+   await replayConsumer.stop();
+   await replayConsumer.disconnect();
+};
+
 const recoverRunningPlans = async () => {
-   for await (const [conversationId, state] of store.iterator()) {
+   for await (const [, state] of store.iterator()) {
+      if (!state.planCompletedEmitted && state.stepIndex >= state.plan.length) {
+         await emitPlanCompleted(state);
+         continue;
+      }
       if (state.status === 'RUNNING' && state.stepIndex < state.plan.length) {
          await sendToolInvocation(state, state.stepIndex);
       }
    }
 };
 
+await replayConversationEvents();
 await recoverRunningPlans();
 
 const requestsLoop = runConsumerWithRestart(
@@ -235,12 +404,7 @@ const eventsLoop = runConsumerWithRestart(
          return;
       }
       if (!(event && typeof event === 'object' && 'eventType' in event)) return;
-      const eventRecord = event as {
-         eventType: string;
-         conversationId: string;
-         userId: string;
-         payload: Record<string, unknown>;
-      };
+      const eventRecord = event as ConversationEventRecord;
 
       const producer = await producerPromise;
 
@@ -261,32 +425,26 @@ const eventsLoop = runConsumerWithRestart(
             });
             return;
          }
-         const { conversationId, userId, payload } = eventRecord;
-         const existing = await store.get(conversationId).catch(() => null);
+         const existing = await store
+            .get(eventRecord.conversationId)
+            .catch(() => null);
          if (existing && existing.status !== 'FAILED') {
             return;
          }
-         const state: OrchestratorState = {
-            conversationId,
-            userId,
-            plan: (payload.plan ?? []) as Array<{
-               tool: string;
-               parameters: Record<string, unknown>;
-            }>,
-            final_answer_synthesis_required: Boolean(
-               payload.final_answer_synthesis_required
-            ),
-            stepIndex: 0,
-            results: [],
-            status: 'RUNNING',
-         };
-         await store.put(conversationId, state);
+         const state = buildStateFromPlan(eventRecord);
+         await store.put(eventRecord.conversationId, state);
          try {
-            await sendToolInvocation(state, 0);
+            if (state.plan.length === 0) {
+               state.status = 'COMPLETED';
+               await store.put(eventRecord.conversationId, state);
+               await emitPlanCompleted(state);
+            } else {
+               await sendToolInvocation(state, 0);
+            }
          } catch (error) {
             await failPlan(
-               conversationId,
-               userId,
+               eventRecord.conversationId,
+               eventRecord.userId,
                (error as Error).message,
                state
             );
@@ -321,12 +479,8 @@ const eventsLoop = runConsumerWithRestart(
          if (!state) return;
          if (state.results[payload.stepIndex]) return; // idempotent
 
-         state.results[payload.stepIndex] = {
-            tool: payload.tool,
-            result: payload.result,
-         };
-         state.stepIndex = payload.stepIndex + 1;
-         await store.put(conversationId, state);
+         await applyEventToState(eventRecord);
+         const updatedState = await store.get(conversationId);
 
          await sendEvent(
             producer,
@@ -341,47 +495,29 @@ const eventsLoop = runConsumerWithRestart(
             }
          );
 
-         if (state.stepIndex >= state.plan.length) {
-            state.status = 'COMPLETED';
-            await store.put(conversationId, state);
-            // Emit PlanCompleted event.
-            // Final synthesis command emission belongs to aggregator service.
-            await sendEvent(
-               producer,
-               schemaPaths.planCompleted,
-               conversationId,
-               {
-                  conversationId,
-                  userId: state.userId,
-                  timestamp: new Date().toISOString(),
-                  eventType: 'PlanCompleted',
-                  payload: {
-                     final_answer_synthesis_required:
-                        state.final_answer_synthesis_required,
-                  },
-               }
-            );
+         if (updatedState.stepIndex >= updatedState.plan.length) {
+            await emitPlanCompleted(updatedState);
             return;
          }
 
          try {
-            await sendToolInvocation(state, state.stepIndex);
+            await sendToolInvocation(updatedState, updatedState.stepIndex);
          } catch (error) {
             await failPlan(
                conversationId,
-               state.userId,
+               updatedState.userId,
                (error as Error).message,
-               state
+               updatedState
             );
          }
       }
 
       if (eventRecord.eventType === 'PlanFailed') {
-         const { conversationId } = eventRecord;
-         const state = await store.get(conversationId).catch(() => null);
-         if (!state) return;
-         state.status = 'FAILED';
-         await store.put(conversationId, state);
+         await applyEventToState(eventRecord);
+      }
+
+      if (eventRecord.eventType === 'PlanCompleted') {
+         await applyEventToState(eventRecord);
       }
    },
    'orchestrator-events'
