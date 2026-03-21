@@ -19,7 +19,7 @@ This project implements an event-sourced, CQRS-style tool-orchestrating agent ov
 - `user-commands`
 - `conversation-events`
 - `tool-invocation-requests`
-- `synthesis-requests`
+- `final-synthesis-requests`
 - `dead-letter-queue`
 - `schema-registry`
 
@@ -29,7 +29,7 @@ This project implements an event-sourced, CQRS-style tool-orchestrating agent ov
 - **Orchestrator**: stateful plan processor; emits tool invocation commands and events.
 - **Tool Workers**: math, exchange, weather, RAG retrieval (Python), LLM inference (Node), synthesis (Node).
 - **Aggregator**: gathers results and requests synthesis.
-- **History Projection**: builds `history.json` from events.
+- **History Projection**: builds a conversation history projection in LevelDB (`.state/history`) from events.
 - **Metrics**: computes end‑to‑end latency, per‑tool latency, throughput, and best‑effort consumer lag.
 
 ## Run Instructions
@@ -154,7 +154,6 @@ Dashboards in Grafana let you spot slow consumers or stuck offsets.
 Add structured logging (JSON) and distributed tracing (OpenTelemetry) so you can trace a conversation through all services.
 Compaction/retention policies on conversation-events to limit storage while keeping recent history.
 Separate command & event topics (CQRS pattern) with log‑compaction for state stores.
-
 
 
 
