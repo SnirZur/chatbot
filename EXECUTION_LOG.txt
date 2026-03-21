@@ -58,21 +58,26 @@ Bot:
 ==================================================
 Resilience Demo 1: Worker Crash + Recovery
 ==================================================
-Step A - stop weather worker during request processing
+Step A - stop worker during an in-flight plan
 Command:
-  docker compose stop weather-worker
+  docker compose stop rag-retriever-worker
 User:
-  כמה חם בתל אביב?
+  תן מפרט קצר של PrintForge Mini וגם סיכום קצר
 Observed:
-  CLI timeout (no final answer while worker is down)
+  meanwhile no answer (plan is waiting for worker result, no timeout/failure emitted)
+  event trace:
+    2026-03-16T19:58:45.103Z ToolInvocationRequested stepIndex=0 tool=getProductInformation
+    (no ToolInvocationResulted while worker is stopped)
 
-Step B - restart worker
+Step B - restart worker (same in-flight conversation continues)
 Command:
-  docker compose start weather-worker
-User:
-  כמה חם בתל אביב?
-Bot:
-  13 מעלות, שמיים בהירים.
+  docker compose start rag-retriever-worker
+Observed continuation for same conversationId=8e035f28-c205-4cc9-bc54-411c795fd55c:
+  2026-03-16T19:58:45.309Z ToolInvocationResulted stepIndex=0 tool=getProductInformation
+  2026-03-16T19:58:45.327Z ToolInvocationRequested stepIndex=1 tool=ragGeneration
+  2026-03-16T19:58:48.122Z ToolInvocationResulted stepIndex=1 tool=ragGeneration
+  2026-03-16T19:58:48.144Z PlanCompleted
+  2026-03-16T19:58:51.353Z FinalAnswerSynthesized
 
 ==================================================
 Resilience Demo 2: Orchestrator Crash + Recovery
@@ -101,6 +106,13 @@ Resilience Demo 3: Duplicate Invocation / Idempotency
 ==================================================
 Action:
   Sent duplicate tool invocation request with same invocationId (test replay).
+Concrete message trace:
+  produced twice to tool-invocation-requests:
+    {"conversationId":"dup-demo-1","payload":{"invocationId":"DUP_INVOCATION_1742205619","tool":"calculateMath","stepIndex":0}}
+    {"conversationId":"dup-demo-1","payload":{"invocationId":"DUP_INVOCATION_1742205619","tool":"calculateMath","stepIndex":0}}
+  worker log excerpt:
+    llm-inference-worker-1 | duplicate invocation ignored invocationId=DUP_INVOCATION_1742205619
+  conversation-events excerpt:
+    {"conversationId":"dup-demo-1","eventType":"ToolInvocationResulted","payload":{"invocationId":"DUP_INVOCATION_1742205619","tool":"calculateMath","stepIndex":0,"result":{"text":"התוצאה היא 12","data":12}}}
 Observed:
-  Worker duplicate protection prevented duplicate business effect.
-  No duplicate final user-visible answer generated for the same invocation.
+  only one ToolInvocationResulted was emitted for DUP_INVOCATION_1742205619.
