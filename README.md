@@ -73,6 +73,21 @@ See `BENCHMARK.md` for a detailed table. Key metrics captured by the metrics ser
 - Throughput (events/sec)
 - Consumer Lag (best‑effort)
 
+| component/scenario | model/provider | avg processing time per event (ms) | max events/sec | quality/accuracy (1-5) | estimated cost |
+|---|---|---:|---:|---:|---|
+| Router plan generation | Ollama Llama3 | 19328.5 | 0.05 | 4 | local (no per-call cost) |
+| Router fallback | OpenAI GPT-3.5 | 638.5 | 1.57 | 4 | low |
+| Orchestrator (ToolInvocationRequested) | Stateful Processor | 8.3 | 120.00 | 4 | low |
+| RAG retrieval | HF all-MiniLM-L6-v2 + ChromaDB | 132.3 | 7.56 | 4 | local |
+| LLM Infer (Ollama) | Ollama Llama3 | 12876.5 | 0.08 | 4 | local (no per-call cost) |
+| LLM Infer (OpenAI) | OpenAI GPT-3.5 | 1385.0 | 0.72 | 4 | low |
+| Aggregator (SynthesizeFinalAnswerRequested) | Stateful Processor | 1.5 | 666.67 | 4 | low |
+| Final synthesis | OpenAI GPT-3.5 | 1377.3 | 0.73 | 4 | low |
+| Complete plan | multiple | 25203.3 | 0.04 | 4 | low |
+
+## Resilience Drills
+Detailed recovery and duplicate-handling procedures are documented in `RESILIENCE.md`.
+
 
 **Analysis and Conclusions**
 Justification: Kafka as Event Store with Event Sourcing
@@ -89,7 +104,7 @@ Topics with Event Sourcing:
  [6] ToolInvocationResulted - step 1  (But event already recorded)
  [7] PlanCompleted                  
  [8] FinalAnswerSynthesized 
-orchestrator.ts makes a recovery. Resilience achieved: Service restarts → reads events from Kafka → rebuilds state → continues where it left off
+orchestrator.ts makes a recovery. Resilience achieved: Service restarts → replays `conversation-events` from Kafka into its LevelDB projection → resumes the next unfinished step
 2. RECOVERY CAPABILITY - Replay & Reconstruct
 Any service can reconstruct the ENTIRE conversation history from Kafka
 Use Cases:
@@ -102,17 +117,17 @@ Every action is permanently recorded with timestamp:
 
 The system uses Kafka as the Source of Truth to manage distributed state without relying on volatile memory or external databases:
 Orchestrator (Persistent State)
-Stores plan execution state in LevelDB (backed by Kafka events)
+Replays `conversation-events` on startup and stores the rebuilt execution state in LevelDB
 Tracks: stepIndex, intermediate results, and status
-On crash: Automatically recovers running plans from disk and resumes exactly where it left off
+On crash: Rebuilds state from Kafka, then resumes or completes any unfinished plan transition
 Each event updates state: PlanGenerated → ToolInvocationResulted → step completion
-Aggregator (Ephemeral State)
-Uses in-memory Maps to cache tool results and user inputs
-When PlanCompleted arrives: compiles all cached results into synthesis request
-On crash: Simply replays events from Kafka to rebuild Maps (no data loss)
+Aggregator (Persistent Projection)
+Uses LevelDB to store user input, tool results, and whether synthesis was already requested
+When PlanCompleted arrives: compiles the persisted results into a synthesis request
+On restart: continues from its projection without recomputing prior events
 Why This Is Resilient
 Kafka keeps every event (immutable log) → state can always be rebuilt
-Local storage is optional → services can recover by replaying events
+Local storage is a projection cache → authoritative recovery path remains Kafka replay
 No external DB dependency → eliminates single point of failure
 Idempotent processing → duplicate events don't cause corruption
 Result: Distributed, scalable, crash-resilient state management with full audit trail. 
@@ -151,6 +166,5 @@ Dashboards in Grafana let you spot slow consumers or stuck offsets.
 Add structured logging (JSON) and distributed tracing (OpenTelemetry) so you can trace a conversation through all services.
 Compaction/retention policies on conversation-events to limit storage while keeping recent history.
 Separate command & event topics (CQRS pattern) with log‑compaction for state stores.
-
 
 
