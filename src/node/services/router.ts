@@ -42,7 +42,13 @@ type ToolName =
    | 'orchestrationSynthesis'
    | 'getProductInformation';
 
-type PlanStep = { tool: ToolName; parameters: Record<string, unknown> };
+type PlanStep = {
+   id: string;
+   purpose: string;
+   dependsOn: string[];
+   tool: ToolName;
+   parameters: Record<string, unknown>;
+};
 type PlanPayload = {
    plan: PlanStep[];
    final_answer_synthesis_required: boolean;
@@ -55,6 +61,35 @@ const getObject = (value: unknown): Record<string, unknown> | null =>
 
 const asString = (value: unknown) =>
    typeof value === 'string' ? value.trim() : '';
+
+const defaultStepMetadata = (tool: ToolName, position: number) => ({
+   id: `step_${position + 1}`,
+   purpose: `Run ${tool}`,
+   dependsOn: position === 0 ? [] : [`step_${position}`],
+});
+
+const extractDependsOnFromParameters = (
+   parameters: Record<string, unknown>
+) => {
+   const refs =
+      JSON.stringify(parameters).match(/<result_from_tool_(\d+)>/g) ?? [];
+   return Array.from(
+      new Set(
+         refs.map((ref) => {
+            const match = ref.match(/<result_from_tool_(\d+)>/);
+            return match ? `step_${match[1]}` : '';
+         })
+      )
+   ).filter((value) => value.length > 0);
+};
+
+const finalizePlanMetadata = (plan: PlanStep[]) => {
+   for (const [index, step] of plan.entries()) {
+      step.id = `step_${index + 1}`;
+      step.purpose = step.purpose || `Run ${step.tool}`;
+      step.dependsOn = extractDependsOnFromParameters(step.parameters);
+   }
+};
 
 const normalizePlanPayload = (
    value: unknown,
@@ -70,53 +105,67 @@ const normalizePlanPayload = (
    }
 
    const normalizedPlan: PlanStep[] = [];
-   for (const rawStep of planRaw) {
+   for (const [index, rawStep] of planRaw.entries()) {
       const normalizedStep = (() => {
          const step = getObject(rawStep);
          if (!step) return null;
          const tool = asString(step.tool) as ToolName;
          const parameters = getObject(step.parameters) ?? {};
+         const id = asString(step.id) || `step_${index + 1}`;
+         const purpose = asString(step.purpose) || `Run ${tool}`;
+         const dependsOn = Array.isArray(step.dependsOn)
+            ? step.dependsOn
+                 .map((value) => asString(value))
+                 .filter((value) => value.length > 0)
+            : index === 0
+              ? []
+              : [`step_${index}`];
+         const withMetadata = (nextParameters: Record<string, unknown>) => ({
+            id,
+            purpose,
+            dependsOn,
+            tool,
+            parameters: nextParameters,
+         });
 
          switch (tool) {
             case 'calculateMath': {
                const expression = asString(parameters.expression);
-               return expression ? { tool, parameters: { expression } } : null;
+               return expression ? withMetadata({ expression }) : null;
             }
             case 'getExchangeRate': {
                const from = asString(parameters.from) || 'USD';
                const to = asString(parameters.to) || 'ILS';
-               return { tool, parameters: { from, to } };
+               return withMetadata({ from, to });
             }
             case 'getWeather': {
                const city = asString(parameters.city);
-               return city ? { tool, parameters: { city } } : null;
+               return city ? withMetadata({ city }) : null;
             }
             case 'generalChat': {
                const message = asString(parameters.message) || userInput;
-               return message ? { tool, parameters: { message } } : null;
+               return message ? withMetadata({ message }) : null;
             }
             case 'ragGeneration': {
                const ragPayload = asString(parameters.ragPayload);
-               return ragPayload ? { tool, parameters: { ragPayload } } : null;
+               return ragPayload ? withMetadata({ ragPayload }) : null;
             }
             case 'analyzeReview': {
                const reviewText = asString(parameters.review_text);
                return reviewText
-                  ? { tool, parameters: { review_text: reviewText } }
+                  ? withMetadata({ review_text: reviewText })
                   : null;
             }
             case 'orchestrationSynthesis': {
                return Object.keys(parameters).length > 0
-                  ? { tool, parameters }
+                  ? withMetadata(parameters)
                   : null;
             }
             case 'getProductInformation': {
                const query =
                   asString(parameters.query) ||
                   asString(parameters.product_name);
-               return query
-                  ? { tool, parameters: { ...parameters, query } }
-                  : null;
+               return query ? withMetadata({ ...parameters, query }) : null;
             }
             default:
                return null;
@@ -128,6 +177,7 @@ const normalizePlanPayload = (
    if (normalizedPlan.length === 0) {
       // Safe fallback to keep pipeline alive when model output is malformed.
       normalizedPlan.push({
+         ...defaultStepMetadata('generalChat', 0),
          tool: 'generalChat',
          parameters: { message: userInput || 'שלום' },
       });
@@ -175,6 +225,7 @@ const ensureRagSteps = (
    if (productStepIndex === -1) {
       const insertAt = ragStepIndex === -1 ? plan.length : ragStepIndex;
       plan.splice(insertAt, 0, {
+         ...defaultStepMetadata('getProductInformation', insertAt),
          tool: 'getProductInformation',
          parameters: { query: productName },
       });
@@ -193,6 +244,7 @@ const ensureRagSteps = (
    const ragPayload = `User question: ${userInput}\nKnowledge: <result_from_tool_${productStepIndex + 1}>`;
    if (ragStepIndex === -1) {
       plan.push({
+         ...defaultStepMetadata('ragGeneration', plan.length),
          tool: 'ragGeneration',
          parameters: { ragPayload },
       });
@@ -230,6 +282,7 @@ const ensureExchangeAndMath = (planJson: PlanPayload, userInput: string) => {
    if (exchangeIndex === -1) {
       const insertAt = mathIndex === -1 ? plan.length : mathIndex;
       plan.splice(insertAt, 0, {
+         ...defaultStepMetadata('getExchangeRate', insertAt),
          tool: 'getExchangeRate',
          parameters: { from: 'USD', to: 'ILS' },
       });
@@ -241,6 +294,7 @@ const ensureExchangeAndMath = (planJson: PlanPayload, userInput: string) => {
 
    if (mathIndex === -1) {
       plan.push({
+         ...defaultStepMetadata('calculateMath', plan.length),
          tool: 'calculateMath',
          parameters: { expression },
       });
@@ -375,6 +429,7 @@ await runConsumerWithRestart(
                ensureRagSteps(planJson, payload.userInput, productName);
             }
             ensureExchangeAndMath(planJson, payload.userInput);
+            finalizePlanMetadata(planJson.plan);
             await sendEvent(
                producer,
                schemaPaths.planGenerated,
