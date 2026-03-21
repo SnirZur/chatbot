@@ -24,13 +24,14 @@ This project implements an event-sourced, CQRS-style tool-orchestrating agent ov
 - `schema-registry`
 
 ## Services
-- **Web UI / Gateway**: uses the existing UI identifier flow. Produces `UserQueryReceived` commands and waits for `FinalAnswerSynthesized` events.
+- **Web UI / Gateway**: packaged in Docker (`web-gateway` + `client`). Produces `UserQueryReceived` commands and waits for `FinalAnswerSynthesized` events.
 - **Router**: generates orchestration plans (Ollama Llama3 primary, OpenAI GPT‑3.5 fallback).
 - **Orchestrator**: stateful plan processor; emits tool invocation commands and events.
 - **Tool Workers**: math, exchange, weather, RAG retrieval (Python), LLM inference (Node), synthesis (Node).
 - **Aggregator**: gathers results and requests synthesis.
 - **History Projection**: builds a conversation history projection in LevelDB (`.state/history`) from events.
 - **Metrics**: computes end‑to‑end latency, per‑tool latency, throughput, and best‑effort consumer lag.
+- **RAG Indexer**: standalone indexing job (`scripts/index_products.py`) also executed as `rag-indexer` in Compose.
 
 ## Run Instructions
 1. Set environment variables (in `.env` or your shell):
@@ -38,7 +39,7 @@ This project implements an event-sourced, CQRS-style tool-orchestrating agent ov
 OPENAI_API_KEY=...
 WEATHER_API_KEY=...
 ```
-2. Start the stack:
+2. Start the full stack (Kafka + Node services + Python workers + web gateway + client):
 ```
 docker compose up -d
 ```
@@ -46,27 +47,23 @@ docker compose up -d
 ```
 docker compose exec ollama ollama pull llama3
 ```
-4. Generate Prisma client for Docker runtime:
+4. Verify running services:
 ```
-bunx --cwd packages/server prisma generate
+docker compose ps
 ```
-5. Web gateway API is available on port 3000:
+5. Open the UI:
 ```
-http://localhost:3000
+http://localhost:5137
 ```
-6. Open the UI (default Vite dev server):
+6. API health check:
 ```
-bun --cwd packages/client run dev
+curl http://localhost:3000/api/kafka/health
 ```
-7. (Optional) run the server locally instead of Docker:
+
+### Standalone indexing command
+You can run indexing independently of the worker:
 ```
-bun --cwd packages/server run dev
-```
-Review endpoints (`/api/products/:id/reviews`) require Prisma + DB. Set
-`ENABLE_REVIEWS=true` and configure `DATABASE_URL` if you want them enabled.
-If you run the server locally and change Prisma schema, regenerate client:
-```
-bunx --cwd packages/server prisma generate
+python scripts/index_products.py
 ```
 
 ## Benchmarking
@@ -154,7 +151,6 @@ Dashboards in Grafana let you spot slow consumers or stuck offsets.
 Add structured logging (JSON) and distributed tracing (OpenTelemetry) so you can trace a conversation through all services.
 Compaction/retention policies on conversation-events to limit storage while keeping recent history.
 Separate command & event topics (CQRS pattern) with log‑compaction for state stores.
-
 
 
 

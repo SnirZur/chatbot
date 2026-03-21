@@ -28,7 +28,7 @@ const topics = {
    userCommands: 'user-commands',
    conversationEvents: 'conversation-events',
    toolInvocationRequests: 'tool-invocation-requests',
-   synthesisRequests: 'synthesis-requests',
+   synthesisRequests: 'final-synthesis-requests',
    deadLetterQueue: 'dead-letter-queue',
    schemaRegistry: 'schema-registry',
 } as const;

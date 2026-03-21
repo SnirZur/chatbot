@@ -230,7 +230,56 @@ services:
         condition: service_healthy
       chromadb:
         condition: service_started
+      rag-indexer:
+        condition: service_completed_successfully
     environment:
       KAFKA_BROKERS: kafka:9092
 
-  # web-gateway and client are run locally (not in docker)
+  rag-indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile.rag
+    working_dir: /app
+    volumes:
+      - ./:/app
+    restart: "no"
+    depends_on:
+      chromadb:
+        condition: service_started
+    command: python scripts/index_products.py
+
+  web-gateway:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: sh -lc "bunx --cwd packages/server prisma generate && bun --cwd packages/server run start"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    env_file:
+      - packages/server/.env
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      PORT: 3000
+      ENABLE_REVIEWS: "false"
+    ports:
+      - "3000:3000"
+
+  client:
+    image: oven/bun:1.1.29
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - ./node_modules:/app/node_modules
+    restart: unless-stopped
+    command: bun --cwd packages/client run dev --host 0.0.0.0 --port 5137
+    depends_on:
+      web-gateway:
+        condition: service_started
+    environment:
+      VITE_API_PROXY_TARGET: http://web-gateway:3000
+    ports:
+      - "5137:5137"
