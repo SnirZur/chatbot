@@ -104,10 +104,3 @@ Action:
 Observed:
   Worker duplicate protection prevented duplicate business effect.
   No duplicate final user-visible answer generated for the same invocation.
-
-==================================================
-Operational Notes
-==================================================
-- "unknown format date-time" warnings appeared from AJV format handling but did not block message flow.
-- Early Kafka coordinator warnings during startup were transient; steady-state processing continued.
-- Conversation-events stream confirms event-driven sequence from user command to final synthesis.
