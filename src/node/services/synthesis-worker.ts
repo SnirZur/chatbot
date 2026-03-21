@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import {
    createKafka,
    createProducer,
@@ -12,6 +10,7 @@ import { topics } from '../lib/topics';
 import { schemaPaths, validateOrThrow } from '../lib/schema';
 import { sendEvent } from '../lib/producer';
 import { generateWithOpenAI } from '../lib/llm';
+import { ORCHESTRATION_SYNTHESIS_PROMPT } from '../lib/prompts';
 import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
@@ -26,11 +25,6 @@ const kafka = createKafka('synthesis-worker');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'synthesis-worker-group');
 const idempotencyStore = createIdempotencyStore('.state/idempotency/synthesis');
-
-const synthesisPrompt = fs.readFileSync(
-   path.resolve('prompts/orchestration-synthesis.txt'),
-   'utf-8'
-);
 
 await waitForKafka(kafka);
 await ensureTopics(kafka);
@@ -128,7 +122,7 @@ await runConsumerWithRestart(
          );
          const text = await generateWithOpenAI({
             model: 'gpt-3.5-turbo',
-            instructions: synthesisPrompt,
+            instructions: ORCHESTRATION_SYNTHESIS_PROMPT,
             prompt: synthesisPayload,
             maxTokens: 200,
             temperature: 0.2,

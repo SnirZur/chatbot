@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import {
    createKafka,
    createProducer,
@@ -12,6 +10,7 @@ import { topics } from '../lib/topics';
 import { schemaPaths, validateOrThrow } from '../lib/schema';
 import { sendEvent } from '../lib/producer';
 import { chatWithOllama, generateWithOpenAI } from '../lib/llm';
+import { ROUTER_SYSTEM_PROMPT } from '../lib/prompts';
 import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
@@ -26,11 +25,6 @@ const kafka = createKafka('router-service');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'router-service-group');
 const idempotencyStore = createIdempotencyStore('.state/idempotency/router');
-
-const routerPrompt = fs.readFileSync(
-   path.resolve('prompts/router.txt'),
-   'utf-8'
-);
 
 const parsePlan = (text: string) => {
    const match = text.match(/\{[\s\S]*\}/);
@@ -141,8 +135,7 @@ const normalizePlanPayload = (
 
    return {
       plan: normalizedPlan,
-      // UI waits for FinalAnswerSynthesized, so keep synthesis enabled.
-      final_answer_synthesis_required: synth || true,
+      final_answer_synthesis_required: synth,
    };
 };
 
@@ -355,7 +348,7 @@ await runConsumerWithRestart(
          try {
             const ollamaText = await chatWithOllama({
                model: 'llama3',
-               system: routerPrompt,
+               system: ROUTER_SYSTEM_PROMPT,
                user: payload.userInput,
             });
             planJson = normalizePlanPayload(
@@ -365,7 +358,7 @@ await runConsumerWithRestart(
          } catch {
             const fallbackText = await generateWithOpenAI({
                model: 'gpt-3.5-turbo',
-               instructions: routerPrompt,
+               instructions: ROUTER_SYSTEM_PROMPT,
                prompt: payload.userInput,
                maxTokens: 240,
                temperature: 0,

@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import {
    createKafka,
    createProducer,
@@ -13,6 +11,12 @@ import { schemaPaths, validateOrThrow } from '../lib/schema';
 import { sendEvent } from '../lib/producer';
 import { chatWithOllama, generateWithOpenAI } from '../lib/llm';
 import {
+   ANALYZE_REVIEW_PROMPT,
+   GENERAL_CHAT_PROMPT,
+   ORCHESTRATION_SYNTHESIS_PROMPT,
+   RAG_GENERATION_PROMPT,
+} from '../lib/prompts';
+import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
 } from '../lib/schemaRegistry';
@@ -25,23 +29,6 @@ import {
 const kafka = createKafka('llm-inference-worker');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'llm-inference-worker-group');
-
-const generalChatPrompt = fs.readFileSync(
-   path.resolve('prompts/general-chat.txt'),
-   'utf-8'
-);
-const ragGenerationPrompt = fs.readFileSync(
-   path.resolve('prompts/rag-generation.txt'),
-   'utf-8'
-);
-const analyzeReviewPrompt = fs.readFileSync(
-   path.resolve('prompts/analyze-review.txt'),
-   'utf-8'
-);
-const orchestrationSynthesisPrompt = fs.readFileSync(
-   path.resolve('prompts/orchestration-synthesis.txt'),
-   'utf-8'
-);
 
 await waitForKafka(kafka);
 await ensureTopics(kafka);
@@ -123,7 +110,7 @@ await runConsumerWithRestart(
             result = {
                text: await chatWithOllama({
                   model: 'llama3',
-                  system: generalChatPrompt,
+                  system: GENERAL_CHAT_PROMPT,
                   user: userInput,
                }),
             };
@@ -136,7 +123,7 @@ await runConsumerWithRestart(
             result = {
                text: await generateWithOpenAI({
                   model: 'gpt-3.5-turbo',
-                  instructions: ragGenerationPrompt,
+                  instructions: RAG_GENERATION_PROMPT,
                   prompt: ragPayload,
                   maxTokens: 220,
                   temperature: 0.2,
@@ -151,7 +138,7 @@ await runConsumerWithRestart(
             result = {
                text: await generateWithOpenAI({
                   model: 'gpt-3.5-turbo',
-                  instructions: analyzeReviewPrompt,
+                  instructions: ANALYZE_REVIEW_PROMPT,
                   prompt: reviewText,
                   maxTokens: 120,
                   temperature: 0.2,
@@ -166,7 +153,7 @@ await runConsumerWithRestart(
             result = {
                text: await generateWithOpenAI({
                   model: 'gpt-3.5-turbo',
-                  instructions: orchestrationSynthesisPrompt,
+                  instructions: ORCHESTRATION_SYNTHESIS_PROMPT,
                   prompt: synthesisPayload,
                   maxTokens: 200,
                   temperature: 0.2,
