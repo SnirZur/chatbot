@@ -36,6 +36,44 @@ type ConversationEventRecord = {
    payload: Record<string, unknown>;
 };
 
+const getCompletedStepIds = (state: OrchestratorState) => {
+   const completed = new Set<string>();
+   for (const [index, step] of state.plan.entries()) {
+      if (state.results[index]) completed.add(step.id);
+   }
+   return completed;
+};
+
+const findNextRunnableStepIndex = (state: OrchestratorState) => {
+   const completedStepIds = getCompletedStepIds(state);
+   for (const [index, step] of state.plan.entries()) {
+      if (state.results[index]) continue;
+      if (
+         step.dependsOn.every((dependency) => completedStepIds.has(dependency))
+      ) {
+         return index;
+      }
+   }
+   return null;
+};
+
+const recalculateProgress = (state: OrchestratorState) => {
+   const completedCount = state.results.filter(Boolean).length;
+   const nextRunnableStepIndex = findNextRunnableStepIndex(state);
+   if (completedCount >= state.plan.length) {
+      state.stepIndex = state.plan.length;
+      state.status = 'COMPLETED';
+      return;
+   }
+   if (nextRunnableStepIndex === null) {
+      state.stepIndex = state.plan.length;
+      state.status = 'FAILED';
+      return;
+   }
+   state.stepIndex = nextRunnableStepIndex;
+   state.status = 'RUNNING';
+};
+
 const resolvePlaceholders = (
    params: Record<string, unknown>,
    results: OrchestratorState['results']
@@ -167,21 +205,28 @@ const failPlan = async (
 
 const buildStateFromPlan = (
    eventRecord: ConversationEventRecord
-): OrchestratorState => ({
-   conversationId: eventRecord.conversationId,
-   userId: eventRecord.userId,
-   plan: (eventRecord.payload.plan ?? []) as Array<{
-      tool: string;
-      parameters: Record<string, unknown>;
-   }>,
-   final_answer_synthesis_required: Boolean(
-      eventRecord.payload.final_answer_synthesis_required
-   ),
-   stepIndex: 0,
-   results: [],
-   planCompletedEmitted: false,
-   status: 'RUNNING',
-});
+): OrchestratorState => {
+   const state: OrchestratorState = {
+      conversationId: eventRecord.conversationId,
+      userId: eventRecord.userId,
+      plan: (eventRecord.payload.plan ?? []) as Array<{
+         id: string;
+         purpose: string;
+         dependsOn: string[];
+         tool: string;
+         parameters: Record<string, unknown>;
+      }>,
+      final_answer_synthesis_required: Boolean(
+         eventRecord.payload.final_answer_synthesis_required
+      ),
+      stepIndex: 0,
+      results: [],
+      planCompletedEmitted: false,
+      status: 'RUNNING',
+   };
+   recalculateProgress(state);
+   return state;
+};
 
 const applyEventToState = async (eventRecord: ConversationEventRecord) => {
    if (eventRecord.eventType === 'PlanGenerated') {
@@ -206,10 +251,7 @@ const applyEventToState = async (eventRecord: ConversationEventRecord) => {
             result: payload.result,
          };
       }
-      state.stepIndex = Math.max(state.stepIndex, payload.stepIndex + 1);
-      if (state.stepIndex >= state.plan.length) {
-         state.status = 'COMPLETED';
-      }
+      recalculateProgress(state);
       await store.put(eventRecord.conversationId, state);
       return state;
    }
@@ -323,6 +365,17 @@ const replayConversationEvents = async () => {
 
 const recoverRunningPlans = async () => {
    for await (const [, state] of store.iterator()) {
+      recalculateProgress(state);
+      await store.put(state.conversationId, state);
+      if (state.status === 'FAILED') {
+         await failPlan(
+            state.conversationId,
+            state.userId,
+            'Recovered plan contains unsatisfied or cyclic dependencies',
+            state
+         );
+         continue;
+      }
       if (!state.planCompletedEmitted && state.stepIndex >= state.plan.length) {
          await emitPlanCompleted(state);
          continue;
@@ -434,12 +487,19 @@ const eventsLoop = runConsumerWithRestart(
          const state = buildStateFromPlan(eventRecord);
          await store.put(eventRecord.conversationId, state);
          try {
-            if (state.plan.length === 0) {
+            if (state.status === 'FAILED') {
+               await failPlan(
+                  eventRecord.conversationId,
+                  eventRecord.userId,
+                  'Plan contains unsatisfied or cyclic dependencies',
+                  state
+               );
+            } else if (state.plan.length === 0) {
                state.status = 'COMPLETED';
                await store.put(eventRecord.conversationId, state);
                await emitPlanCompleted(state);
             } else {
-               await sendToolInvocation(state, 0);
+               await sendToolInvocation(state, state.stepIndex);
             }
          } catch (error) {
             await failPlan(
