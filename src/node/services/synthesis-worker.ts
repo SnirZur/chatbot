@@ -62,8 +62,9 @@ await runConsumerWithRestart(
          return;
       }
       const commandType = (command as { commandType?: string }).commandType;
-      const conversationId = (command as { conversationId?: string })
-         .conversationId;
+      const conversationId = String(
+         (command as { conversationId?: string }).conversationId ?? ''
+      );
       console.log('synthesis-worker received command', {
          conversationId,
          commandType,
@@ -98,6 +99,20 @@ await runConsumerWithRestart(
          userId: string;
          payload: { userInput: string; toolResults: unknown[] };
       };
+      if (!conversationId) {
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: 'Missing conversationId',
+                     payload: command,
+                  }),
+               },
+            ],
+         });
+         return;
+      }
       if (await hasBeenProcessed(idempotencyStore, conversationId)) {
          console.log(
             'synthesis-worker: Skipping already processed',
@@ -141,7 +156,7 @@ await runConsumerWithRestart(
                userId,
                timestamp: new Date().toISOString(),
                eventType: 'FinalAnswerSynthesized',
-               payload: { message: text },
+               payload: { message: text ?? '' },
             }
          );
          await markProcessed(idempotencyStore, conversationId);

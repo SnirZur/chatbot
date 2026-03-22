@@ -42,9 +42,16 @@ Examples:
 
 The project separates write-side commands from read-side events and projections.
 
-- Commands request work: `UserQueryReceived`, `ToolInvocationRequested`, `SynthesizeFinalAnswerRequested`
-- Events record facts: `PlanGenerated`, `ToolInvocationResulted`, `PlanCompleted`, `FinalAnswerSynthesized`
+- Commands request work on command topics and use a `commandType` envelope:
+  `UserQueryReceived`, `ToolInvocationRequested`, `SynthesizeFinalAnswerRequested`
+- Events record facts on `conversation-events` and use an `eventType` envelope:
+  `UserQueryReceived`, `PlanGenerated`, `ToolInvocationRequested`, `ToolInvocationResulted`, `PlanCompleted`, `FinalAnswerSynthesized`
 - Projections are built from events only and are never treated as authoritative state
+
+Some semantic names intentionally appear on both sides, for example
+`UserQueryReceived` as an incoming command and then as the persisted event that
+records the accepted fact. The distinction is the topic plus the envelope
+(`commandType` vs `eventType`), not just the label.
 
 This keeps write flows auditable and read models disposable and replayable.
 
@@ -142,10 +149,16 @@ python scripts/index_products.py
 
 The repository contains both documented drills and committed evidence artifacts.
 
-- `EXECUTION_LOG.txt`: full-stack orchestration, RAG, worker recovery, and duplicate-handling log
-- `RESILIENCE_LOG.txt`: deterministic replay-based resilience evidence generated locally from `scripts/generate_resilience_log.ts`
+- `EXECUTION_LOG.md`: full-stack orchestration, RAG, worker recovery, and duplicate-handling log
+- `RESILIENCE_LOG.txt`: deterministic local resilience evidence generated from `scripts/generate_resilience_log.ts`
 - `scripts/resilience_drill.ts`: Docker/Kafka drill for live local execution when Docker access is available
 - `RESILIENCE.md`: grading-oriented resilience procedures and evidence mapping
+
+Generate the deterministic local resilience log with:
+
+```bash
+bun scripts/generate_resilience_log.ts > RESILIENCE_LOG.txt
+```
 
 ## Benchmarking
 
