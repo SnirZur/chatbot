@@ -96,14 +96,3 @@ export const runConsumerWithRestart = async (
       }
    }
 };
-
-export async function connect(client: Kafka) {
-   try {
-      logPhase('kafka', 'connecting');
-      await client.connect();
-      logPhase('kafka', 'connected');
-   } catch (err) {
-      logPhase('kafka', 'connect failed', err);
-      throw err;
-   }
-}

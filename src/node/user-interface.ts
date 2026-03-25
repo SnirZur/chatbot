@@ -63,7 +63,7 @@ const guessUnavailableService = (conversationId: string): string => {
       case 'ToolInvocationRequested':
          return (
             toolToService[state.lastRequestedTool ?? ''] ??
-            'tool-worker-service'
+            'tool-execution-service'
          );
       case 'PlanCompleted':
          return 'synthesis-worker';

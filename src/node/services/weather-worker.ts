@@ -40,7 +40,10 @@ const getWeather = async (city: string) => {
    url.searchParams.set('lang', 'he');
    const response = await fetch(url);
    if (!response.ok) throw new Error('Weather API request failed');
-   const data = await response.json();
+   const data = (await response.json()) as {
+      main?: { temp?: number };
+      weather?: Array<{ description?: string }>;
+   };
    const temp = Number(data?.main?.temp);
    const description = data?.weather?.[0]?.description;
    if (!Number.isFinite(temp) || typeof description !== 'string') {

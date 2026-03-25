@@ -1,236 +1,284 @@
-version: "3.9"
 services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.1
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
+   zookeeper:
+      image: confluentinc/cp-zookeeper:7.6.1
+      environment:
+         ZOOKEEPER_CLIENT_PORT: 2181
+         ZOOKEEPER_TICK_TIME: 2000
+      ports:
+         - '2181:2181'
 
-  kafka:
-    image: confluentinc/cp-kafka:7.6.1
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-      - "29092:29092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+   kafka:
+      image: confluentinc/cp-kafka:7.6.1
+      depends_on:
+         - zookeeper
+      ports:
+         - '9092:9092'
+         - '29092:29092'
+      environment:
+         KAFKA_BROKER_ID: 1
+         KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+         KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+         KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+         KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+         KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+         KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+         KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
 
-    healthcheck:
-      test: ["CMD", "bash", "-c", ">/dev/tcp/localhost/9092"]
-      interval: 5s
-      timeout: 2s
-      retries: 10
-      start_period: 5s
+      healthcheck:
+         test: ['CMD', 'bash', '-c', '>/dev/tcp/localhost/9092']
+         interval: 5s
+         timeout: 2s
+         retries: 10
+         start_period: 5s
 
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
+   ollama:
+      image: ollama/ollama:latest
+      ports:
+         - '11434:11434'
 
-  chromadb:
-    image: chromadb/chroma:latest
-    ports:
-      - "8000:8000"
+   chromadb:
+      image: chromadb/chroma:latest
+      ports:
+         - '8000:8000'
 
-  router:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/router.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-      ollama:
-        condition: service_started
-    env_file:
-      - packages/server/.env
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OLLAMA_HOST: http://ollama:11434
+   router:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/router.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+         ollama:
+            condition: service_started
+      env_file:
+         - packages/server/.env
+      environment:
+         KAFKA_BROKERS: kafka:9092
+         OPENAI_API_KEY: ${OPENAI_API_KEY}
+         OLLAMA_HOST: http://ollama:11434
 
-  orchestrator:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/orchestrator.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      KAFKA_BROKERS: kafka:9092
+   orchestrator:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/orchestrator.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      environment:
+         KAFKA_BROKERS: kafka:9092
 
-  math-worker:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/math-worker.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      KAFKA_BROKERS: kafka:9092
+   math-worker:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/math-worker.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      environment:
+         KAFKA_BROKERS: kafka:9092
 
-  exchange-rate-worker:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/exchange-rate-worker.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      KAFKA_BROKERS: kafka:9092
+   exchange-rate-worker:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/exchange-rate-worker.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      environment:
+         KAFKA_BROKERS: kafka:9092
 
-  weather-worker:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/weather-worker.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    env_file:
-      - packages/server/.env
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      WEATHER_API_KEY: ${WEATHER_API_KEY}
+   weather-worker:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/weather-worker.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      env_file:
+         - packages/server/.env
+      environment:
+         KAFKA_BROKERS: kafka:9092
+         WEATHER_API_KEY: ${WEATHER_API_KEY}
 
-  llm-inference-worker:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/llm-inference-worker.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-      ollama:
-        condition: service_started
-    env_file:
-      - packages/server/.env
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OLLAMA_HOST: http://ollama:11434
+   llm-inference-worker:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/llm-inference-worker.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+         ollama:
+            condition: service_started
+      env_file:
+         - packages/server/.env
+      environment:
+         KAFKA_BROKERS: kafka:9092
+         OPENAI_API_KEY: ${OPENAI_API_KEY}
+         OLLAMA_HOST: http://ollama:11434
 
-  synthesis-worker:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/synthesis-worker.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    env_file:
-      - packages/server/.env
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+   synthesis-worker:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/synthesis-worker.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      env_file:
+         - packages/server/.env
+      environment:
+         KAFKA_BROKERS: kafka:9092
+         OPENAI_API_KEY: ${OPENAI_API_KEY}
 
-  aggregator:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/aggregator.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      KAFKA_BROKERS: kafka:9092
+   aggregator:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/aggregator.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      environment:
+         KAFKA_BROKERS: kafka:9092
 
-  history-projection:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/history-projection.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      KAFKA_BROKERS: kafka:9092
+   history-projection:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/history-projection.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      environment:
+         KAFKA_BROKERS: kafka:9092
 
-  metrics:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/services/metrics.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      KAFKA_BROKERS: kafka:9092
+   metrics:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/services/metrics.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      environment:
+         KAFKA_BROKERS: kafka:9092
 
-  user-interface:
-    image: oven/bun:1.1.29
-    working_dir: /app
-    volumes:
-      - ./:/app
-      - ./node_modules:/app/node_modules
-    restart: unless-stopped
-    command: bun src/node/user-interface.ts
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      KAFKAJS_LOG_LEVEL: none
-    stdin_open: true
-    tty: true
+   user-interface:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun src/node/user-interface.ts
+      depends_on:
+         kafka:
+            condition: service_healthy
+      environment:
+         KAFKA_BROKERS: kafka:9092
+         KAFKAJS_LOG_LEVEL: none
+      stdin_open: true
+      tty: true
 
-  rag-retriever-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.rag
-    working_dir: /app
-    volumes:
-      - ./:/app
-    restart: unless-stopped
-    depends_on:
-      kafka:
-        condition: service_healthy
-      chromadb:
-        condition: service_started
-    environment:
-      KAFKA_BROKERS: kafka:9092
+   rag-retriever-worker:
+      build:
+         context: .
+         dockerfile: Dockerfile.rag
+      working_dir: /app
+      volumes:
+         - ./:/app
+      restart: unless-stopped
+      depends_on:
+         kafka:
+            condition: service_healthy
+         chromadb:
+            condition: service_started
+         rag-indexer:
+            condition: service_completed_successfully
+      environment:
+         KAFKA_BROKERS: kafka:9092
 
-  # web-gateway and client are run locally (not in docker)
+   rag-indexer:
+      build:
+         context: .
+         dockerfile: Dockerfile.rag
+      working_dir: /app
+      volumes:
+         - ./:/app
+      restart: 'no'
+      depends_on:
+         chromadb:
+            condition: service_started
+      command: python scripts/index_products.py
+
+   web-gateway:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: sh -lc "bunx --cwd packages/server prisma generate && bun --cwd packages/server run start"
+      depends_on:
+         kafka:
+            condition: service_healthy
+      env_file:
+         - packages/server/.env
+      environment:
+         KAFKA_BROKERS: kafka:9092
+         PORT: 3000
+         ENABLE_REVIEWS: 'false'
+      ports:
+         - '3000:3000'
+
+   client:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - ./node_modules:/app/node_modules
+      restart: unless-stopped
+      command: bun --cwd packages/client run dev --host 0.0.0.0 --port 5137
+      depends_on:
+         web-gateway:
+            condition: service_started
+      environment:
+         VITE_API_PROXY_TARGET: http://web-gateway:3000
+      ports:
+         - '5137:5137'
