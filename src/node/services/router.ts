@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
    createKafka,
    createProducer,
@@ -10,7 +12,6 @@ import { topics } from '../lib/topics';
 import { schemaPaths, validateOrThrow } from '../lib/schema';
 import { sendEvent } from '../lib/producer';
 import { chatWithOllama, generateWithOpenAI } from '../lib/llm';
-import { ROUTER_SYSTEM_PROMPT } from '../lib/prompts';
 import {
    publishSchemasOnce,
    startSchemaRegistryConsumer,
@@ -25,6 +26,24 @@ const kafka = createKafka('router-service');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'router-service-group');
 const idempotencyStore = createIdempotencyStore('.state/idempotency/router');
+
+// Debug: Print all keys in the idempotency store at startup
+const printIdempotencyKeys = async (label = '') => {
+   const keys = [];
+   for await (const key of idempotencyStore.keys()) {
+      keys.push(key);
+   }
+   console.log(`Idempotency store keys${label ? ' ' + label : ''}:`, keys);
+};
+
+(async () => {
+   await printIdempotencyKeys('at startup');
+})();
+
+const routerPrompt = fs.readFileSync(
+   path.resolve('prompts/router.txt'),
+   'utf-8'
+);
 
 const parsePlan = (text: string) => {
    const match = text.match(/\{[\s\S]*\}/);
@@ -42,13 +61,7 @@ type ToolName =
    | 'orchestrationSynthesis'
    | 'getProductInformation';
 
-type PlanStep = {
-   id: string;
-   purpose: string;
-   dependsOn: string[];
-   tool: ToolName;
-   parameters: Record<string, unknown>;
-};
+type PlanStep = { tool: ToolName; parameters: Record<string, unknown> };
 type PlanPayload = {
    plan: PlanStep[];
    final_answer_synthesis_required: boolean;
@@ -61,35 +74,6 @@ const getObject = (value: unknown): Record<string, unknown> | null =>
 
 const asString = (value: unknown) =>
    typeof value === 'string' ? value.trim() : '';
-
-const defaultStepMetadata = (tool: ToolName, position: number) => ({
-   id: `step_${position + 1}`,
-   purpose: `Run ${tool}`,
-   dependsOn: position === 0 ? [] : [`step_${position}`],
-});
-
-const extractDependsOnFromParameters = (
-   parameters: Record<string, unknown>
-) => {
-   const refs =
-      JSON.stringify(parameters).match(/<result_from_tool_(\d+)>/g) ?? [];
-   return Array.from(
-      new Set(
-         refs.map((ref) => {
-            const match = ref.match(/<result_from_tool_(\d+)>/);
-            return match ? `step_${match[1]}` : '';
-         })
-      )
-   ).filter((value) => value.length > 0);
-};
-
-const finalizePlanMetadata = (plan: PlanStep[]) => {
-   for (const [index, step] of plan.entries()) {
-      step.id = `step_${index + 1}`;
-      step.purpose = step.purpose || `Run ${step.tool}`;
-      step.dependsOn = extractDependsOnFromParameters(step.parameters);
-   }
-};
 
 const normalizePlanPayload = (
    value: unknown,
@@ -105,67 +89,53 @@ const normalizePlanPayload = (
    }
 
    const normalizedPlan: PlanStep[] = [];
-   for (const [index, rawStep] of planRaw.entries()) {
+   for (const rawStep of planRaw) {
       const normalizedStep = (() => {
          const step = getObject(rawStep);
          if (!step) return null;
          const tool = asString(step.tool) as ToolName;
          const parameters = getObject(step.parameters) ?? {};
-         const id = asString(step.id) || `step_${index + 1}`;
-         const purpose = asString(step.purpose) || `Run ${tool}`;
-         const dependsOn = Array.isArray(step.dependsOn)
-            ? step.dependsOn
-                 .map((value) => asString(value))
-                 .filter((value) => value.length > 0)
-            : index === 0
-              ? []
-              : [`step_${index}`];
-         const withMetadata = (nextParameters: Record<string, unknown>) => ({
-            id,
-            purpose,
-            dependsOn,
-            tool,
-            parameters: nextParameters,
-         });
 
          switch (tool) {
             case 'calculateMath': {
                const expression = asString(parameters.expression);
-               return expression ? withMetadata({ expression }) : null;
+               return expression ? { tool, parameters: { expression } } : null;
             }
             case 'getExchangeRate': {
                const from = asString(parameters.from) || 'USD';
                const to = asString(parameters.to) || 'ILS';
-               return withMetadata({ from, to });
+               return { tool, parameters: { from, to } };
             }
             case 'getWeather': {
                const city = asString(parameters.city);
-               return city ? withMetadata({ city }) : null;
+               return city ? { tool, parameters: { city } } : null;
             }
             case 'generalChat': {
                const message = asString(parameters.message) || userInput;
-               return message ? withMetadata({ message }) : null;
+               return message ? { tool, parameters: { message } } : null;
             }
             case 'ragGeneration': {
                const ragPayload = asString(parameters.ragPayload);
-               return ragPayload ? withMetadata({ ragPayload }) : null;
+               return ragPayload ? { tool, parameters: { ragPayload } } : null;
             }
             case 'analyzeReview': {
                const reviewText = asString(parameters.review_text);
                return reviewText
-                  ? withMetadata({ review_text: reviewText })
+                  ? { tool, parameters: { review_text: reviewText } }
                   : null;
             }
             case 'orchestrationSynthesis': {
                return Object.keys(parameters).length > 0
-                  ? withMetadata(parameters)
+                  ? { tool, parameters }
                   : null;
             }
             case 'getProductInformation': {
                const query =
                   asString(parameters.query) ||
                   asString(parameters.product_name);
-               return query ? withMetadata({ ...parameters, query }) : null;
+               return query
+                  ? { tool, parameters: { ...parameters, query } }
+                  : null;
             }
             default:
                return null;
@@ -177,7 +147,6 @@ const normalizePlanPayload = (
    if (normalizedPlan.length === 0) {
       // Safe fallback to keep pipeline alive when model output is malformed.
       normalizedPlan.push({
-         ...defaultStepMetadata('generalChat', 0),
          tool: 'generalChat',
          parameters: { message: userInput || 'שלום' },
       });
@@ -185,7 +154,8 @@ const normalizePlanPayload = (
 
    return {
       plan: normalizedPlan,
-      final_answer_synthesis_required: synth,
+      // UI waits for FinalAnswerSynthesized, so keep synthesis enabled.
+      final_answer_synthesis_required: synth || true,
    };
 };
 
@@ -225,7 +195,6 @@ const ensureRagSteps = (
    if (productStepIndex === -1) {
       const insertAt = ragStepIndex === -1 ? plan.length : ragStepIndex;
       plan.splice(insertAt, 0, {
-         ...defaultStepMetadata('getProductInformation', insertAt),
          tool: 'getProductInformation',
          parameters: { query: productName },
       });
@@ -244,7 +213,6 @@ const ensureRagSteps = (
    const ragPayload = `User question: ${userInput}\nKnowledge: <result_from_tool_${productStepIndex + 1}>`;
    if (ragStepIndex === -1) {
       plan.push({
-         ...defaultStepMetadata('ragGeneration', plan.length),
          tool: 'ragGeneration',
          parameters: { ragPayload },
       });
@@ -282,7 +250,6 @@ const ensureExchangeAndMath = (planJson: PlanPayload, userInput: string) => {
    if (exchangeIndex === -1) {
       const insertAt = mathIndex === -1 ? plan.length : mathIndex;
       plan.splice(insertAt, 0, {
-         ...defaultStepMetadata('getExchangeRate', insertAt),
          tool: 'getExchangeRate',
          parameters: { from: 'USD', to: 'ILS' },
       });
@@ -294,7 +261,6 @@ const ensureExchangeAndMath = (planJson: PlanPayload, userInput: string) => {
 
    if (mathIndex === -1) {
       plan.push({
-         ...defaultStepMetadata('calculateMath', plan.length),
          tool: 'calculateMath',
          parameters: { expression },
       });
@@ -331,15 +297,20 @@ await runConsumerWithRestart(
             ? `${commandType ?? 'unknown'}:${incomingConversationId}`
             : null;
          if (dedupeKey) {
+            await printIdempotencyKeys('before processing command');
             if (await hasBeenProcessed(idempotencyStore, dedupeKey)) {
                console.log(
                   'router-service skipping already processed',
                   dedupeKey
                );
+               await printIdempotencyKeys('after skipping command');
                return;
             }
          }
          if (commandType === 'UserControl') {
+            await printIdempotencyKeys(
+               'before marking processed (UserControl)'
+            );
             try {
                validateOrThrow(schemaPaths.userControl, command);
             } catch (error) {
@@ -366,14 +337,21 @@ await runConsumerWithRestart(
                }
             );
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
+            await printIdempotencyKeys('after marking processed (UserControl)');
             return;
          }
 
          try {
+            await printIdempotencyKeys(
+               'before marking processed (UserQueryReceived)'
+            );
             validateOrThrow(schemaPaths.userQueryReceived, command);
          } catch (error) {
             await sendToDlq(command, (error as Error).message);
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
+            await printIdempotencyKeys(
+               'after marking processed (UserQueryReceived)'
+            );
             return;
          }
 
@@ -402,7 +380,7 @@ await runConsumerWithRestart(
          try {
             const ollamaText = await chatWithOllama({
                model: 'llama3',
-               system: ROUTER_SYSTEM_PROMPT,
+               system: routerPrompt,
                user: payload.userInput,
             });
             planJson = normalizePlanPayload(
@@ -412,7 +390,7 @@ await runConsumerWithRestart(
          } catch {
             const fallbackText = await generateWithOpenAI({
                model: 'gpt-3.5-turbo',
-               instructions: ROUTER_SYSTEM_PROMPT,
+               instructions: routerPrompt,
                prompt: payload.userInput,
                maxTokens: 240,
                temperature: 0,
@@ -429,7 +407,6 @@ await runConsumerWithRestart(
                ensureRagSteps(planJson, payload.userInput, productName);
             }
             ensureExchangeAndMath(planJson, payload.userInput);
-            finalizePlanMetadata(planJson.plan);
             await sendEvent(
                producer,
                schemaPaths.planGenerated,
@@ -444,8 +421,10 @@ await runConsumerWithRestart(
             );
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
          } catch (error) {
+            await printIdempotencyKeys('before marking processed (error)');
             await sendToDlq(planJson, (error as Error).message);
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
+            await printIdempotencyKeys('after marking processed (error)');
          }
       } catch (error) {
          console.error('router-service failed:', error);

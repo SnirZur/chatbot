@@ -3,13 +3,12 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 import chromadb
 from jsonschema import Draft7Validator
 from kafka import KafkaConsumer, KafkaProducer
 from sentence_transformers import SentenceTransformer
-from rag_indexing import COLLECTION_NAME, DB_DIR, ensure_indexed
 
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092").split(",")
 
@@ -18,6 +17,9 @@ TOPIC_EVENTS = "conversation-events"
 TOPIC_DLQ = "dead-letter-queue"
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+DATA_DIR = ROOT_DIR / "data" / "products"
+DB_DIR = ROOT_DIR / "python-service" / "chroma_db"
+COLLECTION_NAME = "products_kb"
 
 SCHEMA_COMMAND = ROOT_DIR / "src" / "schemas" / "commands" / "toolInvocationRequested.json"
 SCHEMA_EVENT = ROOT_DIR / "src" / "schemas" / "events" / "toolInvocationResulted.json"
@@ -85,6 +87,49 @@ model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 client = chromadb.PersistentClient(path=str(DB_DIR))
 collection = client.get_or_create_collection(name=COLLECTION_NAME)
 idempotency_conn = ensure_idempotency_db()
+
+
+def read_text_files(directory: Path) -> List[Tuple[str, str]]:
+    files = sorted(directory.glob("*.txt"))
+    contents: List[Tuple[str, str]] = []
+    for file in files:
+        text = file.read_text(encoding="utf-8")
+        contents.append((file.name, text))
+    return contents
+
+
+def chunk_text(text: str, min_size: int = 600, max_size: int = 1200, overlap: int = 200) -> List[str]:
+    normalized = " ".join(text.split())
+    chunks: List[str] = []
+    start = 0
+    while start < len(normalized):
+        end = min(start + max_size, len(normalized))
+        if end - start < min_size and end < len(normalized):
+            end = min(start + min_size, len(normalized))
+        chunk = normalized[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end == len(normalized):
+            break
+        start = max(0, end - overlap)
+    return chunks
+
+
+def ensure_indexed() -> None:
+    if collection.count() > 0:
+        return
+    docs = read_text_files(DATA_DIR)
+    chunks: List[Tuple[str, int, str]] = []
+    for filename, text in docs:
+        parts = chunk_text(text)
+        for idx, part in enumerate(parts):
+            chunks.append((filename, idx, part))
+    if not chunks:
+        return
+    embeddings = model.encode([chunk[2] for chunk in chunks])
+    ids = [f"{chunk[0]}-{chunk[1]}" for chunk in chunks]
+    metadatas = [{"source": chunk[0], "index": chunk[1]} for chunk in chunks]
+    collection.add(ids=ids, documents=[chunk[2] for chunk in chunks], embeddings=embeddings, metadatas=metadatas)
 
 
 def publish_dlq(payload: Any, error: str) -> None:

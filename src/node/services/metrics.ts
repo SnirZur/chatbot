@@ -22,11 +22,6 @@ const invocationStarts = new Map<string, { tool: string; timestamp: string }>();
 let eventCount = 0;
 let startWindow = Date.now();
 
-type GroupOffsetsResponse = Array<{
-   topic: string;
-   partitions: Array<{ partition: number; offset: string }>;
-}>;
-
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -183,24 +178,31 @@ setInterval(async () => {
       const topicOffsets = await admin.fetchTopicOffsets(
          topics.conversationEvents
       );
-      const groupOffsets = (await admin.fetchOffsets({
+      const groupOffsets = await admin.fetchOffsets({
          groupId: 'metrics-service-group',
          topics: [topics.conversationEvents],
-      })) as GroupOffsetsResponse;
-      const groupTopic = groupOffsets.find(
-         (group) => group.topic === topics.conversationEvents
-      );
-      const lag = topicOffsets.reduce((sum, partition) => {
-         const groupPartition = groupTopic?.partitions.find(
-            (entry) => entry.partition === partition.partition
+      });
+      const lag = topicOffsets.reduce((sum, topicOffset) => {
+         const groupTopic = groupOffsets.find(
+            (group) => group.topic === topicOffset.topic
          );
-         if (!groupPartition) return sum;
+         if (!groupTopic) return sum;
+         const partitions = topicOffset.partitions;
          return (
             sum +
-            Math.max(
-               0,
-               Number(partition.offset) - Number(groupPartition.offset)
-            )
+            partitions.reduce((acc, partition) => {
+               const groupPartition = groupTopic.partitions.find(
+                  (p) => p.partition === partition.partition
+               );
+               if (!groupPartition) return acc;
+               return (
+                  acc +
+                  Math.max(
+                     0,
+                     Number(partition.offset) - Number(groupPartition.offset)
+                  )
+               );
+            }, 0)
          );
       }, 0);
       console.log(`[METRICS] consumer_lag=${lag}`);

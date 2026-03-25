@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SERVICE="${1:-orchestrator}"
+MARKER="${2:-}"
+STEP_INDEX="${3:-1}"
+
+if [[ -z "${MARKER}" ]]; then
+  echo "[invoke_disaster] service=${SERVICE} mode=latest-question stepIndex=${STEP_INDEX}"
+else
+  echo "[invoke_disaster] service=${SERVICE} mode=marker marker=${MARKER} stepIndex=${STEP_INDEX}"
+fi
+echo "[invoke_disaster] waiting on topic conversation-events..."
+
+python3 - "$MARKER" "$STEP_INDEX" "$SERVICE" <<'PY'
+import json
+import subprocess
+import sys
+
+marker = sys.argv[1]
+step_index = int(sys.argv[2])
+service = sys.argv[3]
+
+consumer_cmd = [
+    "docker", "compose", "exec", "-T", "kafka",
+    "kafka-console-consumer",
+    "--bootstrap-server", "kafka:9092",
+    "--topic", "conversation-events",
+]
+
+target_conversation = None
+
+proc = subprocess.Popen(
+    consumer_cmd,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+    bufsize=1,
+)
+
+try:
+    assert proc.stdout is not None
+    for raw in proc.stdout:
+        line = raw.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+
+        et = ev.get("eventType")
+        cid = ev.get("conversationId")
+        payload = ev.get("payload") or {}
+
+        if et == "UserQueryReceived":
+            user_input = str(payload.get("userInput", ""))
+            if (not marker) or (marker in user_input):
+                target_conversation = cid
+                if marker:
+                    print(f"[invoke_disaster] target conversationId={target_conversation} (matched marker)", flush=True)
+                else:
+                    print(f"[invoke_disaster] target conversationId={target_conversation} (latest question)", flush=True)
+
+        if target_conversation and cid == target_conversation:
+            if et == "ToolInvocationRequested" and int(payload.get("stepIndex", -1)) == step_index:
+                print(
+                    f"[invoke_disaster] hit stepIndex={step_index}; killing PID 1 in service {service}",
+                    flush=True,
+                )
+                subprocess.run(
+                    ["docker", "compose", "exec", "-T", service, "sh", "-lc", "kill -9 1"],
+                    check=False,
+                )
+                print("[invoke_disaster] crash injected. exiting.", flush=True)
+                break
+finally:
+    proc.terminate()
+PY

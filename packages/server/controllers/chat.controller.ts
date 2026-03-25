@@ -1,6 +1,5 @@
 import type { Request, Response } from 'express';
 import path from 'path';
-import { Level } from 'level';
 import z from 'zod';
 import { isKafkaReady, sendReset, sendUserInput } from '../kafka.gateway';
 
@@ -15,18 +14,6 @@ const chatSchema = z.object({
 });
 
 // Public interface
-const historyStore = new Level<string, { messages: unknown[] }>(
-   path.resolve(
-      import.meta.dir,
-      '..',
-      '..',
-      '..',
-      '.state',
-      'history-projection'
-   ),
-   { valueEncoding: 'json' }
-);
-
 export const chatController = {
    async getKafkaHealth(_req: Request, res: Response) {
       res.setHeader('Cache-Control', 'no-store');
@@ -36,18 +23,23 @@ export const chatController = {
    async getHistoryStatus(req: Request, res: Response) {
       try {
          const conversationId = String(req.query.conversationId ?? '').trim();
-         if (!conversationId) {
+         const historyPath = path.resolve(
+            import.meta.dir,
+            '..',
+            '..',
+            '..',
+            'history.json'
+         );
+         const file = Bun.file(historyPath);
+         if (!conversationId || !(await file.exists())) {
             res.json({ hasHistory: false, message: '' });
             return;
          }
-         let hasHistory = false;
-         try {
-            const state = await historyStore.get(conversationId);
-            hasHistory =
-               Array.isArray(state?.messages) && state.messages.length > 0;
-         } catch (error) {
-            if (!(error as { notFound?: boolean }).notFound) throw error;
-         }
+
+         const data = await file.text();
+         const parsed = JSON.parse(data) as Record<string, unknown>;
+         const history = parsed[conversationId];
+         const hasHistory = Array.isArray(history) && history.length > 0;
          res.json({
             hasHistory,
             message: hasHistory

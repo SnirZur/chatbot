@@ -52,8 +52,6 @@ export const schemaPaths = {
    toolInvocationResulted: 'events/toolInvocationResulted.json',
    planCompleted: 'events/planCompleted.json',
    planFailed: 'events/planFailed.json',
-   finalAnswerSynthesisRequestedEvent:
-      'events/finalAnswerSynthesisRequested.json',
    finalAnswerSynthesized: 'events/finalAnswerSynthesized.json',
    userQueryEvent: 'events/userQueryReceived.json',
    userHistoryReset: 'events/userHistoryReset.json',
