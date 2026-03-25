@@ -1,0 +1,16 @@
+# Node/Bun dependencies
+node_modules/
+**/node_modules/
+
+# VCS and editor metadata
+.git/
+.gitignore
+.vscode/
+
+# Caches and logs
+**/__pycache__/
+**/*.log
+
+# Local runtime/artifacts not needed for image build
+python-service/chroma_db/
+.state/

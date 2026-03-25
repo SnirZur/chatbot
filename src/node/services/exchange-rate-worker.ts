@@ -19,6 +19,38 @@ import {
    markProcessed,
 } from '../lib/idempotencyStore';
 
+const EXCHANGE_RATE_HOST_ACCESS_KEY = process.env.EXCHANGE_RATE_HOST_ACCESS_KEY;
+const fxCache = new Map<string, { rate: number; expiresAt: number }>();
+const FX_CACHE_TTL_MS = 5 * 60 * 1000;
+async function fetchFxRate(from: string, to: string): Promise<number> {
+   if (!EXCHANGE_RATE_HOST_ACCESS_KEY) {
+      throw new Error('Missing EXCHANGE_RATE_HOST_ACCESS_KEY');
+   }
+
+   const url = new URL('https://api.exchangerate.host/convert');
+   url.searchParams.set('access_key', EXCHANGE_RATE_HOST_ACCESS_KEY);
+   url.searchParams.set('from', from);
+   url.searchParams.set('to', to);
+   url.searchParams.set('amount', '1');
+
+   const res = await fetch(url.toString());
+   if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(
+         `FX API error: ${res.status} ${res.statusText} ${body}`.trim()
+      );
+   }
+
+   const data = (await res.json()) as { result?: number };
+
+   const rate = data.result;
+   if (typeof rate !== 'number' || !Number.isFinite(rate)) {
+      throw new Error('FX API response missing numeric rate in "result"');
+   }
+
+   return rate;
+}
+
 const kafka = createKafka('exchange-rate-worker');
 const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'exchange-rate-worker-group');
@@ -27,28 +59,27 @@ const idempotencyStore = createIdempotencyStore(
    '.state/idempotency/exchange-rate-worker'
 );
 
-const getExchangeRate = (from: string, to = 'ILS') => {
+const getExchangeRate = async (from: string, to = 'ILS') => {
    const normalizedFrom = from.trim().toUpperCase();
-   const normalizedTo = to.trim().toUpperCase() || 'ILS';
+   const normalizedTo = (to ?? 'ILS').trim().toUpperCase() || 'ILS';
+
    if (!normalizedFrom) return { text: 'לא מכיר את קוד המטבע שביקשת.' };
+
    if (normalizedTo !== 'ILS')
       return { text: 'כרגע אני תומך רק בשער מול ש״ח.' };
-   const rates: Record<string, number> = {
-      USD: 3.75,
-      EUR: 4.05,
-      GBP: 4.7,
-      JPY: 0.026,
-   };
-   const labels: Record<string, string> = {
-      USD: 'הדולר',
-      EUR: 'האירו',
-      GBP: 'הליש״ט',
-      JPY: 'היין היפני',
-   };
-   const rate = rates[normalizedFrom];
-   if (!rate) return { text: 'לא מכיר את קוד המטבע שביקשת.' };
-   const label = labels[normalizedFrom] ?? normalizedFrom;
-   return { text: `שער ${label} היציג הוא ${rate} ש״ח`, rate };
+
+   const cacheKey = `${normalizedFrom}->${normalizedTo}`;
+   const cached = fxCache.get(cacheKey);
+   const now = Date.now();
+   if (cached && cached.expiresAt > now) {
+      const rate = cached.rate;
+      return { text: `שער ${normalizedFrom} היציג הוא ${rate} ש״ח`, rate };
+   }
+
+   const rate = await fetchFxRate(normalizedFrom, normalizedTo);
+   fxCache.set(cacheKey, { rate, expiresAt: now + FX_CACHE_TTL_MS });
+
+   return { text: `שער ${normalizedFrom} היציג הוא ${rate} ש״ח`, rate };
 };
 
 await waitForKafka(kafka);
@@ -108,7 +139,7 @@ await runConsumerWithRestart(
       try {
          const from = String(payload.parameters.from ?? '');
          const to = String(payload.parameters.to ?? 'ILS');
-         const result = getExchangeRate(from, to);
+         const result = await getExchangeRate(from, to);
 
          await sendEvent(
             producer,

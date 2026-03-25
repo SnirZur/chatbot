@@ -41,15 +41,26 @@ services:
       ports:
          - '8000:8000'
 
+   bun-deps:
+      image: oven/bun:1.1.29
+      working_dir: /app
+      volumes:
+         - ./:/app
+         - bun_node_modules:/app/node_modules
+      restart: 'no'
+      command: sh -lc "HUSKY=0 bun install"
+
    router:
       image: oven/bun:1.1.29
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/router.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
          ollama:
@@ -66,10 +77,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/orchestrator.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       environment:
@@ -80,10 +93,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/math-worker.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       environment:
@@ -94,10 +109,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/exchange-rate-worker.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       environment:
@@ -108,10 +125,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/weather-worker.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       env_file:
@@ -125,10 +144,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/llm-inference-worker.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
          ollama:
@@ -145,10 +166,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/synthesis-worker.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       env_file:
@@ -162,10 +185,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/aggregator.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       environment:
@@ -176,10 +201,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/history-projection.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       environment:
@@ -190,10 +217,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/services/metrics.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       environment:
@@ -204,10 +233,12 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
       restart: unless-stopped
       command: bun src/node/user-interface.ts
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       environment:
@@ -252,10 +283,13 @@ services:
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
+         - server_node_modules:/app/packages/server/node_modules
       restart: unless-stopped
-      command: sh -lc "bunx --cwd packages/server prisma generate && bun --cwd packages/server run start"
+      command: sh -lc "cd packages/server && bunx prisma generate && bun run start"
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          kafka:
             condition: service_healthy
       env_file:
@@ -268,17 +302,25 @@ services:
          - '3000:3000'
 
    client:
-      image: oven/bun:1.1.29
+      image: oven/bun:1.2.17
       working_dir: /app
       volumes:
          - ./:/app
-         - ./node_modules:/app/node_modules
+         - bun_node_modules:/app/node_modules
+         - client_node_modules:/app/packages/client/node_modules
       restart: unless-stopped
-      command: bun --cwd packages/client run dev --host 0.0.0.0 --port 5137
+      command: sh -lc "cd packages/client && bun run dev --host 0.0.0.0 --port 5137"
       depends_on:
+         bun-deps:
+            condition: service_completed_successfully
          web-gateway:
             condition: service_started
       environment:
          VITE_API_PROXY_TARGET: http://web-gateway:3000
       ports:
          - '5137:5137'
+
+volumes:
+   bun_node_modules:
+   server_node_modules:
+   client_node_modules:
