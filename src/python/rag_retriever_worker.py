@@ -88,6 +88,13 @@ client = chromadb.PersistentClient(path=str(DB_DIR))
 collection = client.get_or_create_collection(name=COLLECTION_NAME)
 idempotency_conn = ensure_idempotency_db()
 
+PRODUCT_FILES = {
+    "printforge mini": "printforge-mini.txt",
+    "brewmaster 360": "brewmaster-360.txt",
+    "evophone x": "evophone-x.txt",
+    "voltrider e2": "voltrider-e2.txt",
+}
+
 
 def read_text_files(directory: Path) -> List[Tuple[str, str]]:
     files = sorted(directory.glob("*.txt"))
@@ -132,6 +139,29 @@ def ensure_indexed() -> None:
     collection.add(ids=ids, documents=[chunk[2] for chunk in chunks], embeddings=embeddings, metadatas=metadatas)
 
 
+def normalize_product_name(name: str) -> str:
+    return " ".join(name.strip().lower().replace("-", " ").split())
+
+
+def get_product_text(product_name: str) -> str:
+    filename = PRODUCT_FILES.get(normalize_product_name(product_name))
+    if not filename:
+        return ""
+    path = DATA_DIR / filename
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+def extract_price_chunks(product_name: str, text: str) -> List[str]:
+    if not text:
+        return []
+    for line in text.splitlines():
+        if line.strip().lower().startswith("price:"):
+            return [f"{product_name}\n{line.strip()}"]
+    return []
+
+
 def publish_dlq(payload: Any, error: str) -> None:
     future = producer.send(TOPIC_DLQ, {"error": error, "payload": payload})
     future.get(timeout=10)
@@ -163,8 +193,15 @@ for message in consumer:
             continue
 
         query = str(payload.get("parameters", {}).get("query", "")).strip()
+        product_name = str(payload.get("parameters", {}).get("product_name", "")).strip()
         if not query:
             result = {"chunks": []}
+        elif product_name:
+            product_text = get_product_text(product_name)
+            if query.lower() == "price":
+                result = {"chunks": extract_price_chunks(product_name, product_text)}
+            else:
+                result = {"chunks": chunk_text(product_text)[:3] if product_text else []}
         else:
             embedding = model.encode([query])
             matches = collection.query(query_embeddings=embedding, n_results=3)

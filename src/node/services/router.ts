@@ -27,19 +27,6 @@ const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'router-service-group');
 const idempotencyStore = createIdempotencyStore('.state/idempotency/router');
 
-// Debug: Print all keys in the idempotency store at startup
-const printIdempotencyKeys = async (label = '') => {
-   const keys = [];
-   for await (const key of idempotencyStore.keys()) {
-      keys.push(key);
-   }
-   console.log(`Idempotency store keys${label ? ' ' + label : ''}:`, keys);
-};
-
-(async () => {
-   await printIdempotencyKeys('at startup');
-})();
-
 const routerPrompt = fs.readFileSync(
    path.resolve('prompts/router.txt'),
    'utf-8'
@@ -174,11 +161,64 @@ const productPatterns = [
    { name: 'Voltrider E2', pattern: /voltrider\s*-?\s*e2/i },
 ];
 
-const detectProductName = (input: string) => {
-   for (const entry of productPatterns) {
-      if (entry.pattern.test(input)) return entry.name;
+const mentionsAllProducts = (input: string) =>
+   /(all\s+(?:my\s+)?products|all\s+products|כל\s+המוצרים|כל\s+המוצרי(?:ם)?\s+שלי)/i.test(
+      input
+   );
+
+const detectProductNames = (input: string) => {
+   if (mentionsAllProducts(input)) {
+      return productPatterns.map((entry) => entry.name);
    }
-   return null;
+
+   const matches = productPatterns
+      .filter((entry) => entry.pattern.test(input))
+      .map((entry) => entry.name);
+   return [...new Set(matches)];
+};
+
+const detectProductName = (input: string) =>
+   detectProductNames(input)[0] ?? null;
+
+const isPriceOnlyProductQuery = (input: string) =>
+   /(price|prices|cost|how much|כמה עולה|כמה עולים|מחיר|מחירים|עלות)/i.test(
+      input
+   );
+
+const ensureProductPriceSteps = (
+   planJson: PlanPayload,
+   userInput: string,
+   productNames: string[]
+) => {
+   if (productNames.length === 0) return;
+
+   const priceSteps: PlanStep[] = productNames.map((productName) => ({
+      tool: 'getProductInformation',
+      parameters: {
+         product_name: productName,
+         query: 'price',
+      },
+   }));
+
+   const placeholders = priceSteps
+      .map((_, index) => `<result_from_tool_${index + 1}>`)
+      .join('\n');
+
+   planJson.plan = [
+      ...priceSteps,
+      {
+         tool: 'ragGeneration',
+         parameters: {
+            ragPayload:
+               `User question: ${userInput}\n` +
+               `Task: Return only the requested product price information in Hebrew. ` +
+               `If there are multiple products, return one short line per product. ` +
+               `Do not add specifications, summary, or extra details.\n` +
+               `Knowledge:\n${placeholders}`,
+         },
+      },
+   ];
+   planJson.final_answer_synthesis_required = true;
 };
 
 const ensureRagSteps = (
@@ -297,20 +337,15 @@ await runConsumerWithRestart(
             ? `${commandType ?? 'unknown'}:${incomingConversationId}`
             : null;
          if (dedupeKey) {
-            await printIdempotencyKeys('before processing command');
             if (await hasBeenProcessed(idempotencyStore, dedupeKey)) {
                console.log(
                   'router-service skipping already processed',
                   dedupeKey
                );
-               await printIdempotencyKeys('after skipping command');
                return;
             }
          }
          if (commandType === 'UserControl') {
-            await printIdempotencyKeys(
-               'before marking processed (UserControl)'
-            );
             try {
                validateOrThrow(schemaPaths.userControl, command);
             } catch (error) {
@@ -337,21 +372,14 @@ await runConsumerWithRestart(
                }
             );
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
-            await printIdempotencyKeys('after marking processed (UserControl)');
             return;
          }
 
          try {
-            await printIdempotencyKeys(
-               'before marking processed (UserQueryReceived)'
-            );
             validateOrThrow(schemaPaths.userQueryReceived, command);
          } catch (error) {
             await sendToDlq(command, (error as Error).message);
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
-            await printIdempotencyKeys(
-               'after marking processed (UserQueryReceived)'
-            );
             return;
          }
 
@@ -402,9 +430,21 @@ await runConsumerWithRestart(
          }
 
          try {
-            const productName = detectProductName(payload.userInput);
-            if (productName) {
-               ensureRagSteps(planJson, payload.userInput, productName);
+            const productNames = detectProductNames(payload.userInput);
+            if (
+               productNames.length > 0 &&
+               isPriceOnlyProductQuery(payload.userInput)
+            ) {
+               ensureProductPriceSteps(
+                  planJson,
+                  payload.userInput,
+                  productNames
+               );
+            } else {
+               const productName = productNames[0] ?? null;
+               if (productName) {
+                  ensureRagSteps(planJson, payload.userInput, productName);
+               }
             }
             ensureExchangeAndMath(planJson, payload.userInput);
             await sendEvent(
@@ -421,10 +461,8 @@ await runConsumerWithRestart(
             );
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
          } catch (error) {
-            await printIdempotencyKeys('before marking processed (error)');
             await sendToDlq(planJson, (error as Error).message);
             if (dedupeKey) await markProcessed(idempotencyStore, dedupeKey);
-            await printIdempotencyKeys('after marking processed (error)');
          }
       } catch (error) {
          console.error('router-service failed:', error);
