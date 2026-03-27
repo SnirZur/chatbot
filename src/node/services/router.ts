@@ -308,6 +308,46 @@ const ensureExchangeAndMath = (planJson: PlanPayload, userInput: string) => {
    planJson.final_answer_synthesis_required = true;
 };
 
+const buildFallbackPlan = (userInput: string): PlanPayload => {
+   const normalizedInput = userInput.trim();
+   const asksProductInfo = /מחיר|מחירים|product|products|price|prices/i.test(
+      normalizedInput
+   );
+
+   if (asksProductInfo) {
+      return {
+         plan: [
+            {
+               ...defaultStepMetadata('getProductInformation', 0),
+               tool: 'getProductInformation',
+               parameters: { query: normalizedInput || 'products and prices' },
+            },
+            {
+               ...defaultStepMetadata('ragGeneration', 1),
+               tool: 'ragGeneration',
+               parameters: {
+                  ragPayload:
+                     `User question: ${normalizedInput}\n` +
+                     'Knowledge: <result_from_tool_1>',
+               },
+            },
+         ],
+         final_answer_synthesis_required: true,
+      };
+   }
+
+   return {
+      plan: [
+         {
+            ...defaultStepMetadata('generalChat', 0),
+            tool: 'generalChat',
+            parameters: { message: normalizedInput || 'שלום' },
+         },
+      ],
+      final_answer_synthesis_required: true,
+   };
+};
+
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -316,7 +356,7 @@ await publishSchemasOnce(producer);
 await startSchemaRegistryConsumer(kafka, 'router-service-schema-registry');
 const consumer = await consumerPromise;
 
-await consumer.subscribe({ topic: topics.userCommands, fromBeginning: true });
+await consumer.subscribe({ topic: topics.userCommands, fromBeginning: false });
 
 await runConsumerWithRestart(
    consumer,
@@ -404,23 +444,36 @@ await runConsumerWithRestart(
                model: 'llama3',
                system: ROUTER_SYSTEM_PROMPT,
                user: payload.userInput,
+               timeoutMs: 15000,
             });
             planJson = normalizePlanPayload(
                parsePlan(ollamaText),
                payload.userInput
             );
-         } catch {
-            const fallbackText = await generateWithOpenAI({
-               model: 'gpt-3.5-turbo',
-               instructions: ROUTER_SYSTEM_PROMPT,
-               prompt: payload.userInput,
-               maxTokens: 240,
-               temperature: 0,
-            });
-            planJson = normalizePlanPayload(
-               parsePlan(fallbackText),
-               payload.userInput
-            );
+         } catch (ollamaError) {
+            try {
+               const fallbackText = await generateWithOpenAI({
+                  model: 'gpt-3.5-turbo',
+                  instructions: ROUTER_SYSTEM_PROMPT,
+                  prompt: payload.userInput,
+                  maxTokens: 240,
+                  temperature: 0,
+                  timeoutMs: 15000,
+               });
+               planJson = normalizePlanPayload(
+                  parsePlan(fallbackText),
+                  payload.userInput
+               );
+            } catch (openaiError) {
+               console.warn(
+                  'router-service falling back to deterministic plan',
+                  {
+                     ollamaError: (ollamaError as Error).message,
+                     openaiError: (openaiError as Error).message,
+                  }
+               );
+               planJson = buildFallbackPlan(payload.userInput);
+            }
          }
 
          try {
@@ -429,6 +482,9 @@ await runConsumerWithRestart(
                ensureRagSteps(planJson, payload.userInput, productName);
             }
             ensureExchangeAndMath(planJson, payload.userInput);
+            if (planJson.plan.length > 1) {
+               planJson.final_answer_synthesis_required = true;
+            }
             finalizePlanMetadata(planJson.plan);
             await sendEvent(
                producer,

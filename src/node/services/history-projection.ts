@@ -37,7 +37,7 @@ await startSchemaRegistryConsumer(kafka, 'history-schema-registry');
 const consumer = await consumerPromise;
 await consumer.subscribe({
    topic: topics.conversationEvents,
-   fromBeginning: true,
+   fromBeginning: false,
 });
 
 await runConsumerWithRestart(

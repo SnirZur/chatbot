@@ -95,7 +95,7 @@ const consumer = await consumerPromise;
 
 await consumer.subscribe({
    topic: topics.toolInvocationRequests,
-   fromBeginning: true,
+   fromBeginning: false,
 });
 
 await runConsumerWithRestart(

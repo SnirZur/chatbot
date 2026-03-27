@@ -15,6 +15,7 @@ type BotResponse = { message: string };
 type ConversationState = {
    lastEventType?: string;
    lastRequestedTool?: string;
+   toolResults?: unknown[];
 };
 
 const kafka = createKafka('user-interface');
@@ -72,6 +73,34 @@ const guessUnavailableService = (conversationId: string): string => {
    }
 };
 
+const summarizeToolResults = (results: unknown[] = []) => {
+   for (let i = results.length - 1; i >= 0; i -= 1) {
+      const result = results[i];
+      if (typeof result === 'string' && result.trim()) return result;
+      if (result && typeof result === 'object') {
+         const asObject = result as {
+            text?: unknown;
+            chunks?: unknown;
+            data?: unknown;
+         };
+         if (typeof asObject.text === 'string' && asObject.text.trim()) {
+            return asObject.text;
+         }
+         if (typeof asObject.data === 'string' && asObject.data.trim()) {
+            return asObject.data;
+         }
+         if (Array.isArray(asObject.chunks) && asObject.chunks.length > 0) {
+            const lines = asObject.chunks
+               .map((chunk) => (typeof chunk === 'string' ? chunk.trim() : ''))
+               .filter((chunk) => chunk.length > 0)
+               .slice(0, 20);
+            if (lines.length > 0) return lines.join('\n\n');
+         }
+      }
+   }
+   return 'The request was completed, but no textual answer payload was produced.';
+};
+
 const waitForResponse = (conversationId: string, timeoutMs = 90000) =>
    new Promise<BotResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -107,15 +136,52 @@ const consumerLoop = runConsumerWithRestart(
          if (event.eventType === 'ToolInvocationRequested') {
             current.lastRequestedTool = String(event.payload?.tool ?? '');
          }
+         if (event.eventType === 'ToolInvocationResulted') {
+            const stepIndex = Number(event.payload?.stepIndex);
+            if (Number.isInteger(stepIndex) && stepIndex >= 0) {
+               current.toolResults ??= [];
+               current.toolResults[stepIndex] = event.payload?.result;
+            }
+         }
          conversationState.set(conversationId, current);
       }
-      if (event?.eventType !== 'FinalAnswerSynthesized') return;
-      if (!conversationId) return;
-      const resolver = pending.get(conversationId);
-      if (resolver && event.payload?.message) {
-         pending.delete(conversationId);
-         conversationState.delete(conversationId);
-         resolver({ message: event.payload.message });
+      if (event?.eventType === 'FinalAnswerSynthesized') {
+         if (!conversationId) return;
+         const resolver = pending.get(conversationId);
+         if (resolver && event.payload?.message) {
+            pending.delete(conversationId);
+            conversationState.delete(conversationId);
+            resolver({ message: event.payload.message });
+         }
+         return;
+      }
+
+      if (event?.eventType === 'PlanCompleted') {
+         if (!conversationId) return;
+         const resolver = pending.get(conversationId);
+         const needsSynthesis = Boolean(
+            event.payload?.final_answer_synthesis_required
+         );
+         if (resolver && !needsSynthesis) {
+            const state = conversationState.get(conversationId);
+            pending.delete(conversationId);
+            conversationState.delete(conversationId);
+            resolver({ message: summarizeToolResults(state?.toolResults) });
+         }
+      }
+
+      if (event?.eventType === 'PlanFailed') {
+         if (!conversationId) return;
+         const resolver = pending.get(conversationId);
+         if (resolver) {
+            pending.delete(conversationId);
+            conversationState.delete(conversationId);
+            resolver({
+               message:
+                  String(event.payload?.reason ?? '').trim() ||
+                  'The orchestration plan failed to complete.',
+            });
+         }
       }
    },
    'user-interface'

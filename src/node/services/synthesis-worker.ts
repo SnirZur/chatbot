@@ -26,6 +26,23 @@ const producerPromise = createProducer(kafka);
 const consumerPromise = createConsumer(kafka, 'synthesis-worker-group');
 const idempotencyStore = createIdempotencyStore('.state/idempotency/synthesis');
 
+const buildFallbackSynthesis = (userInput: string, toolResults: unknown[]) => {
+   const normalized = toolResults.filter((entry) => entry !== undefined);
+   for (let i = normalized.length - 1; i >= 0; i -= 1) {
+      const entry = normalized[i];
+      if (typeof entry === 'string' && entry.trim()) return entry;
+      if (entry && typeof entry === 'object') {
+         const candidate = (entry as { text?: unknown }).text;
+         if (typeof candidate === 'string' && candidate.trim())
+            return candidate;
+      }
+   }
+   return (
+      'I could not complete model-based synthesis at the moment, ' +
+      `but your request was processed: ${userInput}`
+   );
+};
+
 await waitForKafka(kafka);
 await ensureTopics(kafka);
 
@@ -36,7 +53,7 @@ const consumer = await consumerPromise;
 
 await consumer.subscribe({
    topic: topics.finalSynthesisRequests,
-   fromBeginning: true,
+   fromBeginning: false,
 });
 
 await runConsumerWithRestart(
@@ -135,13 +152,26 @@ await runConsumerWithRestart(
             'synthesis-worker: Generating final answer for',
             conversationId
          );
-         const text = await generateWithOpenAI({
-            model: 'gpt-3.5-turbo',
-            instructions: ORCHESTRATION_SYNTHESIS_PROMPT,
-            prompt: synthesisPayload,
-            maxTokens: 200,
-            temperature: 0.2,
-         });
+         let text = '';
+         try {
+            text = await generateWithOpenAI({
+               model: 'gpt-3.5-turbo',
+               instructions: ORCHESTRATION_SYNTHESIS_PROMPT,
+               prompt: synthesisPayload,
+               maxTokens: 200,
+               temperature: 0.2,
+               timeoutMs: 15000,
+            });
+         } catch (error) {
+            console.warn(
+               'synthesis-worker: OpenAI synthesis failed, using fallback',
+               (error as Error).message
+            );
+            text = buildFallbackSynthesis(
+               payload.userInput,
+               payload.toolResults
+            );
+         }
 
          console.log(
             'synthesis-worker: Emitting FinalAnswerSynthesized for',

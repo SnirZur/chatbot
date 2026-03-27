@@ -290,11 +290,11 @@ await publishSchemasOnce(producer);
 await startSchemaRegistryConsumer(kafka, 'orchestrator-schema-registry');
 await eventsConsumer.subscribe({
    topic: topics.conversationEvents,
-   fromBeginning: true,
+   fromBeginning: false,
 });
 await requestsConsumer.subscribe({
    topic: topics.toolInvocationRequests,
-   fromBeginning: true,
+   fromBeginning: false,
 });
 
 const replayConversationEvents = async () => {
@@ -320,7 +320,7 @@ const replayConversationEvents = async () => {
    );
    await replayConsumer.subscribe({
       topic: topics.conversationEvents,
-      fromBeginning: true,
+      fromBeginning: false,
    });
 
    await new Promise<void>((resolve, reject) => {

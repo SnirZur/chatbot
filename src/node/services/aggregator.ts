@@ -38,15 +38,21 @@ const consumer = await consumerPromise;
 
 await consumer.subscribe({
    topic: topics.conversationEvents,
-   fromBeginning: true,
+   fromBeginning: false,
 });
 
 const getState = async (conversationId: string) => {
+   const defaultState = {
+      userInput: '',
+      toolResults: [],
+      synthesisRequested: false,
+   };
    try {
-      return await store.get(conversationId);
+      const state = await store.get(conversationId);
+      return state ?? defaultState;
    } catch (error) {
       if ((error as { notFound?: boolean }).notFound) {
-         return { userInput: '', toolResults: [], synthesisRequested: false };
+         return defaultState;
       }
       throw error;
    }
@@ -214,7 +220,7 @@ const replayConversationEvents = async () => {
    );
    await replayConsumer.subscribe({
       topic: topics.conversationEvents,
-      fromBeginning: true,
+      fromBeginning: false,
    });
 
    await new Promise<void>((resolve, reject) => {

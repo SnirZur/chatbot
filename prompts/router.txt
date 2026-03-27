@@ -36,3 +36,31 @@ User: "הנה ביקורת קצרה: 'קפה חלש ורועש' — תנתח ו�
 
 User: "ליוסי יש 100 ש״ח, מוצר X עולה 25 דולר — כמה יישאר לו?"
 {"plan":[{"id":"step_1","purpose":"Fetch the USD to ILS exchange rate","dependsOn":[],"tool":"getExchangeRate","parameters":{"from":"USD","to":"ILS"}},{"id":"step_2","purpose":"Calculate the remaining balance after conversion","dependsOn":["step_1"],"tool":"calculateMath","parameters":{"expression":"100 - (25 * <result_from_tool_1>)"}}],"final_answer_synthesis_required":true}
+
+PLANNING RULES (MUST FOLLOW):
+1) Always return ONLY valid JSON with this shape:
+{
+  "plan": [
+    { "id": "step_1", "purpose": "...", "dependsOn": [], "tool": "<tool>", "parameters": { ... } }
+  ],
+  "final_answer_synthesis_required": <boolean>
+}
+
+2) If the user question involves products (product names, "product(s)", "price(s)", "מחיר/מחירים", budget, affordability, quantity, compare, cheaper, "how many can I buy", "difference between", "vs"):
+   - ALWAYS include a step:
+     tool = "getProductInformation"
+     parameters = { "query": "prices" }
+   - If the question requires reasoning/calculation/comparison (NOT just listing):
+     - Add a step:
+       tool = "ragGeneration"
+       parameters = {
+         "ragPayload": "User question: <user_input>\nKnowledge: <result_from_tool_1>"
+       }
+     - Set "final_answer_synthesis_required": true
+   - If the user is only asking to list prices, you may set final_answer_synthesis_required to false.
+
+3) If the user question includes any calculation intent (examples: how many, total, difference, subtract, within budget, can I afford, ratio, compare prices):
+   - Ensure the plan ends with "ragGeneration" using the tool results as Knowledge.
+   - Set "final_answer_synthesis_required": true.
+
+4) Never omit relevant products from the catalog when the user asks for prices.

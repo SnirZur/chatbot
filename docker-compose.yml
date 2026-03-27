@@ -264,6 +264,9 @@ services:
             condition: service_completed_successfully
       environment:
          KAFKA_BROKERS: kafka:9092
+         POSTHOG_DISABLED: "1"
+         ANONYMIZED_TELEMETRY: "False"
+         CHROMA_TELEMETRY: "False"
 
    rag-indexer:
       build:

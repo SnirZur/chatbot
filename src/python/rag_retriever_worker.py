@@ -11,6 +11,11 @@ from kafka import KafkaConsumer, KafkaProducer
 from sentence_transformers import SentenceTransformer
 from rag_indexing import COLLECTION_NAME, DB_DIR, ensure_indexed
 
+import re
+from typing import List
+
+
+
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092").split(",")
 
 TOPIC_REQUESTS = "tool-invocation-requests"
@@ -84,6 +89,44 @@ consumer = KafkaConsumer(
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 client = chromadb.PersistentClient(path=str(DB_DIR))
 collection = client.get_or_create_collection(name=COLLECTION_NAME)
+
+PRICE_RE = re.compile(r"^\s*Price:\s*(.+)\s*$", re.IGNORECASE | re.MULTILINE)
+
+def is_pricing_query(query: str) -> bool:
+    q = query.lower()
+    return ("מחיר" in q) or ("מחירים" in q) or ("price" in q) or ("pricing" in q)
+
+USD_NUMBER_RE = re.compile(r"\$?\s*([\d,]+(?:\.\d+)?)")
+
+def parse_usd_number(price_text: str) -> float | None:
+    m = USD_NUMBER_RE.search(price_text or "")
+    if not m:
+        return None
+    return float(m.group(1).replace(",", ""))
+
+def build_price_catalog(root_dir: Path) -> List[Dict[str, Any]]:
+    data_dir = root_dir / "data" / "products"
+    items: List[Dict[str, str]] = []
+    for file in sorted(data_dir.glob("*.txt")):
+        text = file.read_text(encoding="utf-8")
+        m = PRICE_RE.search(text)
+        if not m:
+            continue
+
+        base = file.stem.replace("-", " ")
+        product = " ".join(w.capitalize() for w in base.split())
+
+        price_text = m.group(1).strip()
+        price_usd = parse_usd_number(price_text)
+
+        items.append(
+            {
+                "product": product,
+                "price": price_text,
+                "price_usd": price_usd, 
+            }
+        )
+    return items
 idempotency_conn = ensure_idempotency_db()
 
 
@@ -120,6 +163,10 @@ for message in consumer:
         query = str(payload.get("parameters", {}).get("query", "")).strip()
         if not query:
             result = {"chunks": []}
+        elif is_pricing_query(query):
+            catalog = build_price_catalog(ROOT_DIR)
+            chunks = [f"{item['product']} — {item['price'].rstrip('.')}" for item in catalog]
+            result = {"chunks": chunks, "prices": catalog}
         else:
             embedding = model.encode([query])
             matches = collection.query(query_embeddings=embedding, n_results=3)

@@ -40,12 +40,60 @@ const consumer = await consumerPromise;
 
 await consumer.subscribe({
    topic: topics.toolInvocationRequests,
-   fromBeginning: true,
+   fromBeginning: false,
 });
 
 const idempotencyStore = createIdempotencyStore(
    '.state/idempotency/llm-inference-worker'
 );
+
+const PRICE_QUERY_PATTERN = /\b(price|prices|cost|pricing)\b|מחיר|מחירים|₪|\$/i;
+
+const buildPriceOnlyAnswer = (ragPayload: string) => {
+   const question =
+      ragPayload.match(/User question:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
+   const isPriceQuery = PRICE_QUERY_PATTERN.test(question || ragPayload);
+   if (!isPriceQuery) return null;
+
+   const knowledge = (() => {
+      const marker = 'Knowledge:';
+      const index = ragPayload.indexOf(marker);
+      return index >= 0 ? ragPayload.slice(index + marker.length) : ragPayload;
+   })();
+
+   const products = [
+      'BrewMaster 360',
+      'EvoPhone X',
+      'PrintForge Mini',
+      'VoltRider E2',
+   ];
+
+   const lines: string[] = [];
+   for (const product of products) {
+      const regex = new RegExp(
+         `${product.replace(/[.*+?^${}()|[\\]\\]/g, '\\\\$&')}[\\s\\S]{0,600}?Price:\\s*([^\\n.]+)`,
+         'i'
+      );
+      const match = knowledge.match(regex);
+      if (match?.[1]) {
+         lines.push(`${product}: ${match[1].trim()}`);
+      }
+   }
+
+   if (lines.length > 0) {
+      return `מחירי המוצרים:\n${lines.join('\n')}`;
+   }
+
+   const rawPriceLines = knowledge
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /price\s*:|\$\s*\d|₪|USD/i.test(line));
+   if (rawPriceLines.length > 0) {
+      return `מחירי המוצרים:\n${rawPriceLines.join('\n')}`;
+   }
+
+   return 'לא מצאתי מחירים מפורשים בנתונים שסופקו.';
+};
 
 await runConsumerWithRestart(
    consumer,
@@ -107,28 +155,68 @@ await runConsumerWithRestart(
          if (payload.tool === 'generalChat') {
             const userInput = String(payload.parameters.message ?? '').trim();
             if (!userInput) throw new Error('generalChat requires message');
-            result = {
-               text: await chatWithOllama({
+            let text: string;
+
+            try {
+               text = await chatWithOllama({
                   model: 'llama3',
                   system: GENERAL_CHAT_PROMPT,
                   user: userInput,
-               }),
-            };
+               });
+            } catch (err) {
+               console.warn(
+                  'Ollama failed in generalChat, falling back to OpenAI:',
+                  err
+               );
+               text = await generateWithOpenAI({
+                  model: 'gpt-3.5-turbo',
+                  instructions: GENERAL_CHAT_PROMPT,
+                  prompt: userInput,
+                  maxTokens: 300,
+                  temperature: 0.2,
+               });
+            }
+
+            result = { text };
          } else if (payload.tool === 'ragGeneration') {
             const ragPayload = String(
                payload.parameters.ragPayload ?? ''
             ).trim();
             if (!ragPayload)
                throw new Error('ragGeneration requires ragPayload');
-            result = {
-               text: await generateWithOpenAI({
-                  model: 'gpt-3.5-turbo',
-                  instructions: RAG_GENERATION_PROMPT,
-                  prompt: ragPayload,
-                  maxTokens: 220,
-                  temperature: 0.2,
-               }),
-            };
+            const priceOnly = buildPriceOnlyAnswer(ragPayload);
+            if (priceOnly) {
+               result = { text: priceOnly };
+            } else {
+               let text = '';
+               try {
+                  text = await generateWithOpenAI({
+                     model: 'gpt-3.5-turbo',
+                     instructions: RAG_GENERATION_PROMPT,
+                     prompt: ragPayload,
+                     maxTokens: 220,
+                     temperature: 0.2,
+                     timeoutMs: 15000,
+                  });
+               } catch {
+                  try {
+                     text = await chatWithOllama({
+                        model: 'llama3',
+                        system: RAG_GENERATION_PROMPT,
+                        user: ragPayload,
+                        timeoutMs: 15000,
+                     });
+                  } catch {
+                     // Last-resort fallback keeps orchestration alive if LLM providers are unavailable.
+                     text =
+                        ragPayload.split('Knowledge:').pop()?.trim() ||
+                        'Unable to synthesize with model providers right now, but retrieved relevant product information.';
+                  }
+               }
+               result = {
+                  text,
+               };
+            }
          } else if (payload.tool === 'analyzeReview') {
             const reviewText = String(
                payload.parameters.review_text ?? ''
