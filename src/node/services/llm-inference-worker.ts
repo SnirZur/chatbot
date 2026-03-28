@@ -49,11 +49,25 @@ const idempotencyStore = createIdempotencyStore(
 
 const PRICE_QUERY_PATTERN = /\b(price|prices|cost|pricing)\b|מחיר|מחירים|₪|\$/i;
 
+const PRICE_LIST_ONLY_PATTERN =
+   /(\blist\b|\bshow\b|what are the prices|give me the prices|מחירים|תן לי מחירים|מה המחירים)/i;
+
+const PRICE_REASONING_PATTERN =
+   /(how many|difference|compare|cheaper|afford|within budget|should i|מה עדיף|האם כדאי|כמה|השוואה|הבדל|יותר זול|אפשר לקנות)/i;
+
 const buildPriceOnlyAnswer = (ragPayload: string) => {
    const question =
       ragPayload.match(/User question:\s*([^\n]+)/i)?.[1]?.trim() ?? '';
    const isPriceQuery = PRICE_QUERY_PATTERN.test(question || ragPayload);
    if (!isPriceQuery) return null;
+
+   // If it looks like the user needs reasoning, do NOT short-circuit.
+   // Let the LLM handle it (rag-generation prompt will stay grounded).
+   const needsReasoning = PRICE_REASONING_PATTERN.test(question);
+   const listOnly = PRICE_LIST_ONLY_PATTERN.test(question);
+
+   // If it's not explicitly a "list prices" request, don't force the shortcut.
+   if (needsReasoning || !listOnly) return null;
 
    const knowledge = (() => {
       const marker = 'Knowledge:';

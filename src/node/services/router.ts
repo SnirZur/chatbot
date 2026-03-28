@@ -134,8 +134,8 @@ const normalizePlanPayload = (
                return expression ? withMetadata({ expression }) : null;
             }
             case 'getExchangeRate': {
-               const from = asString(parameters.from) || 'USD';
-               const to = asString(parameters.to) || 'ILS';
+               const from = (asString(parameters.from) || 'USD').toUpperCase();
+               const to = (asString(parameters.to) || 'ILS').toUpperCase();
                return withMetadata({ from, to });
             }
             case 'getWeather': {
@@ -444,7 +444,7 @@ await runConsumerWithRestart(
                model: 'llama3',
                system: ROUTER_SYSTEM_PROMPT,
                user: payload.userInput,
-               timeoutMs: 15000,
+               timeoutMs: 50000,
             });
             planJson = normalizePlanPayload(
                parsePlan(ollamaText),
@@ -456,7 +456,7 @@ await runConsumerWithRestart(
                   model: 'gpt-3.5-turbo',
                   instructions: ROUTER_SYSTEM_PROMPT,
                   prompt: payload.userInput,
-                  maxTokens: 240,
+                  maxTokens: 1000,
                   temperature: 0,
                   timeoutMs: 15000,
                });

@@ -64,3 +64,34 @@ PLANNING RULES (MUST FOLLOW):
    - Set "final_answer_synthesis_required": true.
 
 4) Never omit relevant products from the catalog when the user asks for prices.
+
+5) RECOMMENDATIONS / ADVICE:
+If the user asks for advice or a decision (e.g., "should I", "what should I do", "is it better", "האם כדאי", "מה עדיף", "להמליץ"):
+- Set final_answer_synthesis_required to true.
+- Prefer gathering missing facts via tools BEFORE answering.
+
+6) WEATHER / GOING OUTSIDE / TEMPERATURE THRESHOLDS:
+If the user mentions weather, temperature, heat/cold, or a threshold (e.g., "above 30 degrees", "30°C", "מעל 30") OR mentions leaving the house/outside,
+AND also mentions a location or country/city and a time (date/month/season):
+- Include getWeather with parameters {"city": "<city name>"}.
+- If the user did NOT provide a city (only a country like "Brazil"/"ברזיל"):
+  Add a generalChat step FIRST that asks for:
+  (a) which city, and
+  (b) the exact dates (or at least the week),
+  and ONLY THEN plan getWeather.
+
+7) MULTI-TOOL RULE:
+If the plan contains more than one step, final_answer_synthesis_required MUST be true.
+
+CURRENCY + TIME RULES (GENERAL):
+- If the user asks about prices/cost "in <currency>" or mentions a country/region that implies a currency OR uses currency symbols/words (€, £, ¥, EUR, GBP, JPY, CAD, AUD, "euros", "pounds", "yen", "דולר", "יורו"):
+  Plan:
+  1) getProductInformation (usually query: "prices" or specific product)
+  2) getExchangeRate with { "from": "USD", "to": "<TARGET_CURRENCY>" } (because product catalog is in USD)
+  3) ragGeneration (or calculateMath) to convert amounts using the exchange rate
+  4) final_answer_synthesis_required = true
+
+- If the user references a past date or relative past time ("a month ago", "last year", "yesterday"):
+  Add a generalChat step FIRST asking for the exact date (YYYY-MM-DD).
+  Only include getExchangeRate with "date" if the user provided an explicit date in YYYY-MM-DD format.
+
