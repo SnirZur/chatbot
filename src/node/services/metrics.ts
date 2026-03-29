@@ -43,7 +43,23 @@ await runConsumerWithRestart(
    consumer,
    async ({ message }) => {
       if (!message.value) return;
-      const event = JSON.parse(message.value.toString());
+      let event: unknown;
+      try {
+         event = JSON.parse(message.value.toString());
+      } catch (error) {
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: `Invalid JSON payload: ${(error as Error).message}`,
+                     payload: message.value.toString(),
+                  }),
+               },
+            ],
+         });
+         return;
+      }
       if (!event?.conversationId || !event?.eventType || !event?.timestamp)
          return;
 

@@ -145,7 +145,23 @@ await runConsumerWithRestart(
    consumer,
    async ({ message }) => {
       if (!message.value) return;
-      const command = JSON.parse(message.value.toString());
+      let command: unknown;
+      try {
+         command = JSON.parse(message.value.toString());
+      } catch (error) {
+         await producer.send({
+            topic: topics.deadLetterQueue,
+            messages: [
+               {
+                  value: JSON.stringify({
+                     error: `Invalid JSON payload: ${(error as Error).message}`,
+                     payload: message.value.toString(),
+                  }),
+               },
+            ],
+         });
+         return;
+      }
       try {
          validateOrThrow(schemaPaths.toolInvocationRequested, command);
       } catch (error) {
