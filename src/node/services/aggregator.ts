@@ -220,7 +220,7 @@ const replayConversationEvents = async () => {
    );
    await replayConsumer.subscribe({
       topic: topics.conversationEvents,
-      fromBeginning: false,
+      fromBeginning: true,
    });
 
    await new Promise<void>((resolve, reject) => {
